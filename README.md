@@ -28,35 +28,27 @@ research-agent is a personal research assistant that indexes papers and articles
 
 ## Quick Start
 
-```bash
-# Initialize workspace
-research init
+Install it as a plugin in your AI agent — no Rust toolchain needed:
 
-# Add a research topic
-research topics add "Rust async runtime design"
+| Agent | Install |
+|-------|---------|
+| Claude Code | `claude plugin marketplace add epicsagas/research-agent` then `claude plugin install research-agent@research-agent` |
+| Codex | `codex plugin marketplace add epicsagas/research-agent` then `codex plugin add research-agent` |
+| Antigravity (agy) | copy this repository into `~/.gemini/config/plugins/research-agent` |
+| Grok Build | `grok plugin install epicsagas/research-agent --trust` |
 
-# Ingest papers from arXiv
-research ingest "async runtime scheduling" --source arxiv
+The plugin auto-installs the `research` binary on session start and exposes
+11 MCP tools, so the agent can ingest, search, analyze, and report on its own.
 
-# Ingest from Semantic Scholar
-research ingest "attention mechanism" --source s2
+Once installed, ask your agent things like:
 
-# Ingest local PDFs
-research ingest --source pdf --path ./papers/
-research ingest --source pdf --path ./papers/my-paper.pdf
+- "Ingest recent papers on graph neural network training from arXiv"
+- "What gaps are left in my <topic> coverage?"
+- "Generate a survey report for <topic>"
 
-# Search your library
-research query "async runtime scheduling"
+## Installation (CLI)
 
-# Analyze knowledge gaps (use topic ID from `research topics list`)
-research gaps --topic <topic-id>
-
-# Generate a report
-research report --topic <topic-id> --title "Rust Async Survey"
-
-```
-
-## Installation
+Prefer driving it by hand? The same binary works as a standalone CLI.
 
 ```bash
 # macOS / Linux — pre-built binary, no Rust required
