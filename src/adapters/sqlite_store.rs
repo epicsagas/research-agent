@@ -71,6 +71,7 @@ impl SqliteStore {
             doi: row.get("doi")?,
             arxiv_id: row.get("arxiv_id")?,
             s2_id: row.get("s2_id")?,
+            openalex_id: row.get("openalex_id")?,
             url: row.get("url")?,
             pdf_path: row.get("pdf_path")?,
             status: {
@@ -106,9 +107,9 @@ impl IndexStore for SqliteStore {
         conn.execute(
             "INSERT OR REPLACE INTO papers
              (id, title, authors, abstract_text, year, venue, doi, arxiv_id, s2_id,
-              url, pdf_path, status, reading_status, notes, tags, relevance_score,
-              rating, created_at, updated_at)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)",
+              openalex_id, url, pdf_path, status, reading_status, notes, tags,
+              relevance_score, rating, created_at, updated_at)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)",
             params![
                 paper.id,
                 paper.title,
@@ -119,6 +120,7 @@ impl IndexStore for SqliteStore {
                 paper.doi,
                 paper.arxiv_id,
                 paper.s2_id,
+                paper.openalex_id,
                 paper.url,
                 paper.pdf_path,
                 paper.status.as_str(),
@@ -140,6 +142,79 @@ impl IndexStore for SqliteStore {
         })?;
         let mut stmt = conn.prepare("SELECT * FROM papers WHERE id = ?1")?;
         let mut rows = stmt.query(params![id])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(Self::paper_from_row(row)?)),
+            None => Ok(None),
+        }
+    }
+
+    fn find_paper_by_doi(&self, doi: &str) -> Result<Option<Paper>> {
+        let conn = self.conn.lock().map_err(|e| {
+            ResearchError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let mut stmt = conn.prepare("SELECT * FROM papers WHERE doi = ?1 LIMIT 1")?;
+        let mut rows = stmt.query(params![doi])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(Self::paper_from_row(row)?)),
+            None => Ok(None),
+        }
+    }
+
+    fn set_paper_body(&self, paper_id: &str, body: &str) -> Result<()> {
+        let conn = self.conn.lock().map_err(|e| {
+            ResearchError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        conn.execute(
+            "INSERT OR REPLACE INTO paper_bodies (paper_id, body) VALUES (?1, ?2)",
+            params![paper_id, body],
+        )?;
+        Ok(())
+    }
+
+    fn get_paper_body(&self, paper_id: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().map_err(|e| {
+            ResearchError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let mut stmt = conn.prepare("SELECT body FROM paper_bodies WHERE paper_id = ?1")?;
+        let mut rows = stmt.query(params![paper_id])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(row.get(0)?)),
+            None => Ok(None),
+        }
+    }
+
+    fn vector_corpus(&self) -> Result<Vec<(i64, String)>> {
+        let conn = self.conn.lock().map_err(|e| {
+            ResearchError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let mut stmt = conn.prepare(
+            "SELECT p.rowid, p.title, p.abstract_text, pb.body
+             FROM papers p
+             LEFT JOIN paper_bodies pb ON pb.paper_id = p.id",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            let title: String = row.get(1)?;
+            let abstract_text: String = row.get(2)?;
+            let body: Option<String> = row.get(3)?;
+            let text = match body {
+                Some(b) if !b.is_empty() => format!("{title}\n{abstract_text}\n{b}"),
+                _ => format!("{title}\n{abstract_text}"),
+            };
+            Ok((row.get::<_, i64>(0)?, text))
+        })?;
+        let mut corpus = Vec::new();
+        for row in rows {
+            corpus.push(row?);
+        }
+        Ok(corpus)
+    }
+
+    fn paper_by_rowid(&self, rowid: i64) -> Result<Option<Paper>> {
+        let conn = self.conn.lock().map_err(|e| {
+            ResearchError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let mut stmt = conn.prepare("SELECT * FROM papers WHERE rowid = ?1")?;
+        let mut rows = stmt.query(params![rowid])?;
         match rows.next()? {
             Some(row) => Ok(Some(Self::paper_from_row(row)?)),
             None => Ok(None),
@@ -210,6 +285,12 @@ impl IndexStore for SqliteStore {
         let conn = self.conn.lock().map_err(|e| {
             ResearchError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
         })?;
+        let fts_query = fts_phrase_query(query);
+        if fts_query.is_empty() {
+            return Ok(Vec::new());
+        }
+        let limit_i64 = limit as i64;
+
         let mut stmt = conn.prepare(
             "SELECT p.* FROM papers p
              JOIN papers_fts fts ON fts.rowid = p.rowid
@@ -217,16 +298,32 @@ impl IndexStore for SqliteStore {
              ORDER BY rank
              LIMIT ?2",
         )?;
-        let limit_i64 = limit as i64;
-        let fts_query = fts_phrase_query(query);
-        if fts_query.is_empty() {
-            return Ok(Vec::new());
-        }
         let rows = stmt.query_map(params![fts_query, limit_i64], Self::paper_from_row)?;
         let mut papers = Vec::new();
         for p in rows {
             papers.push(p?);
         }
+
+        // Body hits: papers whose stored body text matches but whose title /
+        // abstract / notes did not. Ranks across two FTS tables are not
+        // comparable, so body-only hits simply follow the metadata hits.
+        // ponytail: append-after ordering; a cross-table rank fusion only pays
+        // off once libraries grow past a few thousand papers.
+        let mut stmt = conn.prepare(
+            "SELECT p.* FROM papers p
+             JOIN paper_bodies pb ON pb.paper_id = p.id
+             JOIN bodies_fts fts ON fts.rowid = pb.rowid
+             WHERE bodies_fts MATCH ?1
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![fts_query, limit_i64], Self::paper_from_row)?;
+        for p in rows {
+            let p = p?;
+            if !papers.iter().any(|existing| existing.id == p.id) {
+                papers.push(p);
+            }
+        }
+        papers.truncate(limit);
         Ok(papers)
     }
 
@@ -517,6 +614,7 @@ impl IndexStore for SqliteStore {
             ResearchError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
         })?;
         conn.execute("INSERT INTO papers_fts(papers_fts) VALUES('rebuild')", [])?;
+        conn.execute("INSERT INTO bodies_fts(bodies_fts) VALUES('rebuild')", [])?;
         Ok(())
     }
 
@@ -871,6 +969,50 @@ mod tests {
         store.rebuild_index().unwrap();
         let results = store.search_papers("rebuild", 10).unwrap();
         assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn body_text_is_stored_searched_and_readable() {
+        let store = test_store();
+        let paper = Paper::new("Invisible Title".into());
+        store.insert_paper(&paper).unwrap();
+        assert!(store.search_papers("quantum", 10).unwrap().is_empty());
+
+        store
+            .set_paper_body(
+                &paper.id,
+                "## Introduction\nThe quantum Lich equation dominates.",
+            )
+            .unwrap();
+
+        // Body-only term finds the paper even though title/abstract don't match.
+        let hits = store.search_papers("quantum", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, paper.id);
+        assert_eq!(hits[0].title, "Invisible Title");
+
+        // Roundtrip: replacing the body works, reading it back works.
+        store
+            .set_paper_body(&paper.id, "## Results\nCompletely different body.")
+            .unwrap();
+        assert!(store.search_papers("quantum", 10).unwrap().is_empty());
+        let body = store.get_paper_body(&paper.id).unwrap().unwrap();
+        assert!(body.contains("## Results"));
+        assert!(store.get_paper_body("missing-id").unwrap().is_none());
+    }
+
+    #[test]
+    fn find_paper_by_doi() {
+        let store = test_store();
+        let mut paper = Paper::new("Doi Paper".into());
+        paper.doi = Some("10.1/findme".into());
+        store.insert_paper(&paper).unwrap();
+
+        assert_eq!(
+            store.find_paper_by_doi("10.1/findme").unwrap().unwrap().id,
+            paper.id
+        );
+        assert!(store.find_paper_by_doi("10.1/missing").unwrap().is_none());
     }
 
     #[test]

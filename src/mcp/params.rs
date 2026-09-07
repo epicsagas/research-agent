@@ -13,13 +13,13 @@ use serde::Deserialize;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct IngestParams {
-    /// Search query (required for arxiv/s2/all; ignored for pdf).
+    /// Search query (required for arxiv/s2/openalex/all; ignored for pdf).
     #[serde(default)]
     pub query: Option<String>,
-    /// Source: "arxiv" | "s2" | "all" | "pdf" (default "all").
+    /// Source: "arxiv" | "s2" | "openalex" | "all" | "pdf" (default "all").
     #[serde(default = "default_source")]
     pub source: String,
-    /// Maximum papers to fetch for arxiv/s2 (default 10).
+    /// Maximum papers to fetch for arxiv/s2/openalex (default 10).
     #[serde(default = "default_limit")]
     pub limit: usize,
     /// Path to a PDF file or directory (required for source=pdf).
@@ -28,6 +28,18 @@ pub struct IngestParams {
     /// Optional topic id to link the ingested papers to.
     #[serde(default)]
     pub topic: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ImportPapersParams {
+    /// Path to a .bib/.bibtex/.json file, or a directory of them.
+    pub path: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct PaperBodyParams {
+    /// Paper id.
+    pub id: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

@@ -1,5 +1,7 @@
 pub mod arxiv_source;
+pub mod bib_importer;
 pub mod llm_research_engine;
+pub mod openalex_source;
 pub mod pdf_source;
 pub mod semantic_scholar_source;
 pub mod sqlite_store;

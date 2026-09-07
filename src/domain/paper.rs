@@ -111,6 +111,9 @@ pub struct Paper {
     pub doi: Option<String>,
     pub arxiv_id: Option<String>,
     pub s2_id: Option<String>,
+    /// OpenAlex work id (`W…`), set by the OpenAlex source.
+    #[serde(default)]
+    pub openalex_id: Option<String>,
     pub url: Option<String>,
     pub pdf_path: Option<String>,
     pub status: PaperStatus,
@@ -137,6 +140,7 @@ impl Paper {
             doi: None,
             arxiv_id: None,
             s2_id: None,
+            openalex_id: None,
             url: None,
             pdf_path: None,
             status: PaperStatus::Discovered,

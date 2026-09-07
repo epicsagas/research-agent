@@ -1,0 +1,13 @@
+# Hermes plugin manifest (YAML).
+# Spec: https://hermes-agent.nousresearch.com/docs/developer-guide/plugins
+# Loaded by `hermes plugins` from ~/.hermes/plugins/research-agent/plugin.yaml
+name: research-agent
+version: "0.1.0"
+description: "Academic research assistant — ingest arXiv/S2 papers, organize topics, track reading."
+author:
+  name: epicsagas
+  url: https://github.com/epicsagas
+# Hermes discovers bundled skills via ctx.register_skill() in __init__.py;
+# this list documents them so forge doctor can verify the bundle.
+provides_skills:
+  - research

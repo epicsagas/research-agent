@@ -31,10 +31,10 @@ The same binary also works as a standalone CLI for terminals and scripts.
 
 | | Feature | Why it matters |
 |--|---------|----------------|
-| 🤖 | MCP server | 13 tools your agent drives directly over stdio — no API key needed |
+| 🤖 | MCP server | 15 tools your agent drives directly over stdio — no API key needed |
 | 🧠 | Agent-native analysis | Gap analysis and reports run inside your agent: tools hand over structured state, the agent reasons, results are persisted |
 | 📚 | Paper indexing | arXiv, Semantic Scholar, and local PDF support |
-| 🔍 | Full-text search | FTS5 finds any paper or note instantly |
+| 🔍 | Hybrid search | FTS5 lexical + local-ONNX semantic hits, RRF-fused — works offline |
 | 📂 | Topic trees | Organize research hierarchically with sub-topics |
 | 📖 | Reading tracker | Queue, track, and rate what you've read |
 | ⚡ | Single binary | No runtime, no server — just `research` |
@@ -85,7 +85,7 @@ auto-install hook does not apply to hermes. If skills_guard blocks the
 install scan, set `plugins.scan_on_install: false` in the hermes config.
 
 The plugin auto-installs the `research` binary on session start and exposes
-13 MCP tools, so the agent can ingest, search, analyze with its own model, and file reports on its own.
+15 MCP tools, so the agent can ingest, search, analyze with its own model, and file reports on its own.
 
 Once installed, ask your agent things like:
 
@@ -99,9 +99,10 @@ The plugin auto-installs the `research` binary on session start and starts the
 **stdio MCP server** (`research mcp`) — the agent discovers and calls the tools
 directly; no human typing CLI commands.
 
-**Tools** (13): `init` · `ingest` · `index_rebuild` · `query_papers` ·
-`topic_brief` · `gaps_record` · `list_gaps` · `report_material` · `report_save` ·
-`topics_list` · `topic_add` · `state` · `update_read`.
+**Tools** (15): `init` · `ingest` · `index_rebuild` · `import_papers` ·
+`paper_body` · `query_papers` · `topic_brief` · `gaps_record` · `list_gaps` ·
+`report_material` · `report_save` · `topics_list` · `topic_add` · `state` ·
+`update_read`.
 
 Analysis is **agent-native**: `topic_brief` and `report_material` hand over the
 structured library state (papers, reading progress, recorded gaps, coverage),
@@ -157,15 +158,17 @@ research --version
 | Command | Description |
 |---------|-------------|
 | `research init` | Initialize research workspace |
-| `research ingest <query> [--source arxiv\|s2\|all]` | Ingest papers from arXiv or Semantic Scholar |
-| `research ingest --source pdf --path <file\|dir>` | Ingest local PDF files |
-| `research index [--rebuild]` | Build or rebuild search index |
-| `research query <q>` | Search papers and notes |
+| `research ingest <query> [--source arxiv\|s2\|openalex\|all]` | Ingest papers from arXiv, Semantic Scholar, or OpenAlex |
+| `research ingest --source pdf --path <file\|dir>` | Ingest local PDF files (full body text is stored and searchable) |
+| `research import <file\|dir>` | Import BibTeX/BibLaTeX or CSL-JSON files (e.g. a Zotero export) |
+| `research index [--rebuild]` | Build or rebuild search index (FTS + vector index) |
+| `research query <q>` | Search papers — hybrid lexical+semantic when embeddings are available |
 | `research gaps [--topic <id>]` | Analyze knowledge gaps (CLI: uses `[llm]` if configured) |
 | `research report --topic <id>` | Generate research report (CLI: uses `[llm]` if configured) |
 | `research topics list` | List all topics |
 | `research topics add <name>` | Add a new topic |
 | `research read <id> [--status <status>] [--rating <1-5>]` | Update reading status or rating |
+| `research read <id> --body` | Print a paper's stored body text |
 | `research status` | Show research state overview |
 | `research mcp` | Start the stdio MCP server (alias: `serve`) |
 
@@ -176,8 +179,15 @@ workspaces.
 ## Requirements
 
 - Rust 1.92+ (only if building from source; pre-built binaries need nothing)
-- Data lives at `~/.research/` (`research.db` index, `config.toml` settings)
+- Data lives at `~/.research/` (`research.db` index, `config.toml`, `embeddings.idx`)
+- Linux binaries target glibc ≥ 2.38 (Ubuntu 24.04+); musl is not built because
+  the bundled ONNX runtime has no musl prebuilts
 - Optional: an LLM for `research gaps` / `research report` **from the CLI only** — set `[llm]` in `~/.research/config.toml` (`provider`, `model`, `api_key_env`); the key is read from that env var at call time. The MCP flow never needs it
+- Optional: hybrid search tuning via `[search]` in `~/.research/config.toml` —
+  `provider = "local"` (default, bundled ONNX model) or `"openai"` with
+  `openai_api_key_env`; `model` picks the local model (default `BGESmallENV15`,
+  a small 384-dim model that runs on CPU). See [ROADMAP.md](ROADMAP.md) for
+  what is deliberately not built yet
 
 ## Contributing
 

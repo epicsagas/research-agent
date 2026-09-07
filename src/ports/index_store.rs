@@ -9,6 +9,20 @@ pub trait IndexStore: Send + Sync {
     // Papers
     fn insert_paper(&self, paper: &Paper) -> Result<()>;
     fn get_paper(&self, id: &str) -> Result<Option<Paper>>;
+    /// Look up a paper by its DOI (exact match). Used by the import pipeline
+    /// to skip records that are already in the library.
+    fn find_paper_by_doi(&self, doi: &str) -> Result<Option<Paper>>;
+    /// Store (or replace) the extracted full body text of a paper. Kept out of
+    /// the `Paper` domain type so MCP/tool responses never carry megabytes of
+    /// body text.
+    fn set_paper_body(&self, paper_id: &str, body: &str) -> Result<()>;
+    /// Fetch the stored body text of a paper, if any.
+    fn get_paper_body(&self, paper_id: &str) -> Result<Option<String>>;
+    /// (rowid, embeddable text) for every paper — the vector index corpus.
+    /// The rowid is the stable join key between the store and the vector file.
+    fn vector_corpus(&self) -> Result<Vec<(i64, String)>>;
+    /// Resolve a vector-index rowid back to its paper.
+    fn paper_by_rowid(&self, rowid: i64) -> Result<Option<Paper>>;
     fn update_paper_status(&self, id: &str, status: PaperStatus) -> Result<()>;
     fn update_reading_status(&self, id: &str, status: ReadingStatus) -> Result<()>;
     fn update_rating(&self, id: &str, rating: Rating) -> Result<()>;

@@ -5,6 +5,33 @@ use crate::error::{ResearchError, Result};
 
 pub struct PdfSource;
 
+/// Longest stored body text, in chars.
+const MAX_BODY_CHARS: usize = 500_000;
+
+/// Recognized section headings (one per line) get `## ` markers so the stored
+/// body keeps its skeleton and downstream readers can cite a section.
+fn section_heading_re() -> &'static regex::Regex {
+    use std::sync::OnceLock;
+    static RE: OnceLock<regex::Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        regex::Regex::new(r"(?mi)^\s*(abstract|introduction|background|related work|methods|method|materials and methods|results|results and discussion|discussion|conclusions?|references|acknowledg(?:e)?ments?)\s*:?\s*$")
+            .unwrap()
+    })
+}
+
+fn prepare_body(text: &str) -> Option<String> {
+    let collapsed: String = text
+        .lines()
+        .map(|l| l.trim_end())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let marked = section_heading_re().replace_all(&collapsed, "\n## $1\n");
+    if marked.trim().is_empty() {
+        return None;
+    }
+    Some(marked.chars().take(MAX_BODY_CHARS).collect())
+}
+
 impl PdfSource {
     pub fn new() -> Self {
         Self
@@ -32,7 +59,7 @@ impl PdfSource {
         )))
     }
 
-    pub fn ingest_file(&self, path: &Path) -> Result<Paper> {
+    pub fn ingest_file(&self, path: &Path) -> Result<(Paper, Option<String>)> {
         let bytes = std::fs::read(path)?;
 
         let text = pdf_extract::extract_text_from_mem(&bytes).map_err(|e| {
@@ -67,7 +94,12 @@ impl PdfSource {
                 .to_string(),
         );
 
-        Ok(paper)
+        // Keep the full body (section-marked, size-capped) so FTS5 and the
+        // vector index can search inside the paper, not just its metadata.
+        // ponytail: 500_000-char cap per paper — a real ceiling; raise if
+        // book-length PDFs matter someday.
+        let body = prepare_body(&text);
+        Ok((paper, body))
     }
 
     pub fn name(&self) -> &str {

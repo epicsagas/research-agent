@@ -49,7 +49,8 @@ function getBinaryVersion() {
 /** Plugin manifest version (source of truth for "is the binary behind?"). */
 function getPluginVersion() {
   try {
-    const p = join(process.env.CLAUDE_PLUGIN_ROOT || "", ".claude-plugin", "plugin.json");
+    const root = process.env.CLAUDE_PLUGIN_ROOT || process.env.GROK_PLUGIN_ROOT || "";
+    const p = join(root, ".claude-plugin", "plugin.json");
     return JSON.parse(readFileSync(p, "utf8")).version || null;
   } catch (_) {}
   return null;

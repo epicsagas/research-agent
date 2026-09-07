@@ -1,57 +1,37 @@
 # Roadmap
 
-Direction: keep the differentiation axis — **your agent's long-term research
-memory** — and raise the table stakes (sources, search, import) to parity with
-established tools, mostly by reusing [llm-kernel](https://github.com/epicsagas/llm-kernel).
-The design identity stays intact: single binary, local-first, offline-capable.
+Shipped capabilities live in the [README](README.md) and
+[CHANGELOG](CHANGELOG.md); this file tracks what is deliberately **not** built
+yet. Items are ordered by expected value, not scheduled.
 
-Analysis flows through the agent, not a bundled LLM: tools return structured
-state (`topic_brief`, `report_material`), the host model reasons, findings are
-persisted (`gaps_record`, `report_save`).
+## Citation graph
 
-## v0.2.0 — Bring your library
+Paper-to-paper relationships (references, citations, related work) via the
+Semantic Scholar citations API or OpenAlex `referenced_works`. Powers "what
+should I read next from this paper" and coverage views that follow edges, not
+just keywords.
 
-New users don't start from an empty library.
+## Support / dispute citation context
 
-- **OpenAlex source** — free, generous API; widens coverage beyond arXiv/S2 at
-  the lowest possible cost
-- **BibTeX import** — absorb an existing `.bib` file into the topic tree
-- **Zotero import** — read a Zotero export/SQLite and map collections to topics
+Classify citations as supporting, disputing, or mentioning (Scite-style).
+Requires a citation-classification data source; none is freely and completely
+available yet, so this waits on a data strategy rather than engineering.
 
-These are the on-ramp: everything else gets more valuable once an existing
-library can move in.
+## Domain sources
 
-## v0.3.0 — Memory that understands meaning
+PubMed / Europe PMC and bioRxiv-style preprint servers as additional
+`PaperSource` adapters. The adapter pattern (`src/ports/paper_source.rs`)
+makes each a small, self-contained addition; they are gated on a concrete
+need from biomedical research workflows.
 
-- **Hybrid search** — BM25 (today) + vector similarity via an llm-kernel
-  feature, fused so either path can answer alone
-- Local embeddings, no external calls — the index stays a single SQLite file
+## Zotero live integration
 
-## v0.4.0 — Deeper papers
+Two-way sync with a running Zotero instance (local HTTP API) instead of the
+current export-import flow (`research import <file|dir>`). Gated on the
+import path proving insufficient in practice.
 
-- **Section-aware PDF parsing** — keep section structure instead of flat text
-- **Page-anchored evidence** — quotes carry back-references so the agent can
-  cite where a claim came from
+## Page-level evidence for PDF bodies
 
-## Later — citation graph and beyond
-
-- **Citation graph** — ingest references/related work, walk the graph from the
-  library side
-- **Contextual citation signals** — how a paper is cited (supporting /
-  contrasting), Scite-style, when a usable open source of citation contexts
-  exists
-- **PubMed source** — for biomedical topics
-
-## Platform
-
-- **First tagged release** — `v0.1.0` with prebuilt binaries so the
-  SessionStart auto-install works for new users
-- **Plugin matrix** — keep Claude Code, Codex, Antigravity, Grok Build and
-  Hermes install paths verified on every release
-- **Installer & updater** — refresh the install scripts and make the
-  SessionStart hook upgrade smoothly against new tags
-- **Docs** — consolidate the product intro page into this repository
-
-## Non-goals
-
-- Bundling an LLM — analysis belongs to the calling agent
+The stored body text keeps section headings (`## Section` markers), but
+pdf-extract does not expose page boundaries. Page-anchored citations need a
+different PDF extraction layer.

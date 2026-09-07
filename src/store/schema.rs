@@ -4,11 +4,16 @@
 /// This never crashes on "duplicate column" even if `_meta.schema_version` lags
 /// behind reality (e.g. a DB upgraded by an earlier build that added the column
 /// without bumping the version).
-pub const MIGRATION_SQL: &[(&str, &str)] =
-    &[("ALTER TABLE papers ADD COLUMN rating INTEGER", "rating")];
+pub const MIGRATION_SQL: &[(&str, &str)] = &[
+    ("ALTER TABLE papers ADD COLUMN rating INTEGER", "rating"),
+    (
+        "ALTER TABLE papers ADD COLUMN openalex_id TEXT",
+        "openalex_id",
+    ),
+];
 
 /// `_meta.schema_version` written once `MIGRATION_SQL` is fully applied.
-pub const TARGET_SCHEMA_VERSION: i64 = 1;
+pub const TARGET_SCHEMA_VERSION: i64 = 2;
 
 pub const SCHEMA_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -24,6 +29,7 @@ CREATE TABLE IF NOT EXISTS papers (
     doi TEXT,
     arxiv_id TEXT,
     s2_id TEXT,
+    openalex_id TEXT,
     url TEXT,
     pdf_path TEXT,
     status TEXT NOT NULL DEFAULT 'discovered',
@@ -101,5 +107,31 @@ CREATE TRIGGER IF NOT EXISTS papers_au AFTER UPDATE ON papers BEGIN
     VALUES('delete', old.rowid, old.title, old.abstract_text, old.notes, old.tags);
     INSERT INTO papers_fts(rowid, title, abstract_text, notes, tags)
     VALUES (new.rowid, new.title, new.abstract_text, new.notes, new.tags);
+END;
+
+-- Full extracted body text lives outside `papers` so the Paper domain type and
+-- every tool response stay small; FTS5 searches it through its own index.
+CREATE TABLE IF NOT EXISTS paper_bodies (
+    paper_id TEXT PRIMARY KEY REFERENCES papers(id) ON DELETE CASCADE,
+    body TEXT NOT NULL DEFAULT ''
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS bodies_fts USING fts5(
+    body, content=paper_bodies, content_rowid=rowid, tokenize='trigram'
+);
+
+CREATE TRIGGER IF NOT EXISTS bodies_ai AFTER INSERT ON paper_bodies BEGIN
+    INSERT INTO bodies_fts(rowid, body) VALUES (new.rowid, new.body);
+END;
+
+CREATE TRIGGER IF NOT EXISTS bodies_ad AFTER DELETE ON paper_bodies BEGIN
+    INSERT INTO bodies_fts(bodies_fts, rowid, body)
+    VALUES('delete', old.rowid, old.body);
+END;
+
+CREATE TRIGGER IF NOT EXISTS bodies_au AFTER UPDATE ON paper_bodies BEGIN
+    INSERT INTO bodies_fts(bodies_fts, rowid, body)
+    VALUES('delete', old.rowid, old.body);
+    INSERT INTO bodies_fts(rowid, body) VALUES (new.rowid, new.body);
 END;
 "#;

@@ -5,7 +5,7 @@ use crate::domain::paper::Paper;
 use crate::error::{ResearchError, Result};
 use crate::ports::paper_source::PaperSource;
 
-fn percent_encode(s: &str) -> String {
+pub(crate) fn percent_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
         match b {

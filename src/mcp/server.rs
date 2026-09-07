@@ -22,6 +22,7 @@ use super::guard;
 use serde_json::{Value, json};
 
 use crate::adapters::arxiv_source::ArxivSource;
+use crate::adapters::openalex_source::OpenAlexSource;
 use crate::adapters::pdf_source::PdfSource;
 use crate::adapters::semantic_scholar_source::SemanticScholarSource;
 use crate::adapters::sqlite_store::SqliteStore;
@@ -143,8 +144,11 @@ fn ingest_pdfs(store: &SqliteStore, p: &IngestParams) -> ToolOutcome<(Vec<Paper>
     let mut skipped = 0usize;
     for path in &paths {
         match src.ingest_file(path) {
-            Ok(paper) => {
+            Ok((paper, body)) => {
                 store.insert_paper(&paper).map_err(err_result)?;
+                if let Some(body) = body {
+                    store.set_paper_body(&paper.id, &body).map_err(err_result)?;
+                }
                 papers.push(paper);
             }
             Err(_) => skipped += 1,
@@ -174,6 +178,14 @@ async fn ingest_remote(store: &SqliteStore, p: &IngestParams) -> ToolOutcome<(Ve
     if p.source == "s2" || p.source == "all" {
         let s2 = SemanticScholarSource::new();
         let fetched = IngestPipeline::new(&s2, store)
+            .run(q, p.limit)
+            .await
+            .map_err(err_result)?;
+        papers.extend(fetched);
+    }
+    if p.source == "openalex" || p.source == "all" {
+        let oa = OpenAlexSource::new();
+        let fetched = IngestPipeline::new(&oa, store)
             .run(q, p.limit)
             .await
             .map_err(err_result)?;
@@ -235,7 +247,7 @@ impl ResearchServer {
     }
 
     #[tool(
-        description = "Ingest papers from arXiv, Semantic Scholar, or local PDFs. source: arxiv|s2|all|pdf. For arxiv/s2/all a query is required; for pdf a path (file or dir) is required. Optionally link ingested papers to a topic. Network-heavy for arxiv/s2 (async)."
+        description = "Ingest papers from arXiv, Semantic Scholar, OpenAlex, or local PDFs. source: arxiv|s2|openalex|all|pdf. For arxiv/s2/openalex/all a query is required; for pdf a path (file or dir) is required. Optionally link ingested papers to a topic. Network-heavy for arxiv/s2/openalex (async)."
     )]
     pub async fn ingest(&self, Parameters(p): Parameters<IngestParams>) -> CallToolResult {
         let store = match open_store(&self.ctx.db_path) {
@@ -259,24 +271,97 @@ impl ResearchServer {
         }))
     }
 
-    #[tool(description = "Force a full rebuild of the search index.")]
+    #[tool(description = "Force a full rebuild of the search index (FTS and the vector index).")]
     pub fn index_rebuild(&self) -> CallToolResult {
         let store = match open_store(&self.ctx.db_path) {
             Ok(s) => s,
             Err(e) => return err_result(e),
         };
-        tool_result!(store.rebuild_index().map(|_| json!({"rebuilt": true})))
+        if let Err(e) = store.rebuild_index() {
+            return err_result(e);
+        }
+        match load_config().ok().and_then(|cfg| {
+            crate::application::hybrid_search::HybridSearch::open(
+                &store,
+                cfg.search.as_ref(),
+                crate::application::hybrid_search::index_path_for(&self.ctx.db_path),
+            )
+        }) {
+            Some(mut hybrid) => match hybrid.rebuild(&store) {
+                Ok(()) => ok_value(json!({"rebuilt": true, "vector_index": true})),
+                Err(e) => {
+                    ok_value(json!({"rebuilt": true, "vector_index": false, "note": e.to_string()}))
+                }
+            },
+            None => ok_value(json!({"rebuilt": true, "vector_index": false})),
+        }
     }
 
     #[tool(
-        description = "Search the local paper index by query. Returns matching papers (id, title, authors, year, status)."
+        description = "Import papers from BibTeX/BibLaTeX (.bib) or CSL-JSON (.json) files — e.g. a Zotero export. path is a file or a directory (all matching files are imported). Papers with a DOI already in the library are skipped."
+    )]
+    pub fn import_papers(&self, Parameters(p): Parameters<ImportPapersParams>) -> CallToolResult {
+        let store = match open_store(&self.ctx.db_path) {
+            Ok(s) => s,
+            Err(e) => return err_result(e),
+        };
+        match crate::application::paper_import::run_import(&store, std::path::Path::new(&p.path)) {
+            Ok(summary) => ok_value(json!({
+                "imported": summary.imported.len(),
+                "skipped_duplicates": summary.skipped_duplicates,
+                "failed": summary.failed,
+                "papers": serde_json::to_value(&summary.imported).unwrap_or(Value::Null),
+            })),
+            Err(e) => err_result(e),
+        }
+    }
+
+    #[tool(
+        description = "Fetch the stored full body text of a paper (from PDF ingest), section headings marked with '## '. Returns text, or has_body=false if only metadata is stored."
+    )]
+    pub fn paper_body(&self, Parameters(p): Parameters<PaperBodyParams>) -> CallToolResult {
+        let store = match open_store(&self.ctx.db_path) {
+            Ok(s) => s,
+            Err(e) => return err_result(e),
+        };
+        match store.get_paper_body(&p.id) {
+            Ok(Some(body)) => {
+                // Cap what flows into an agent's context window; the full text
+                // stays in the DB (`research read <id> --body` prints it all).
+                const MAX_TOOL_BODY_CHARS: usize = 40_000;
+                let truncated = body.chars().take(MAX_TOOL_BODY_CHARS).collect::<String>();
+                ok_value(json!({
+                    "id": p.id,
+                    "has_body": true,
+                    "truncated": truncated.chars().count() < body.chars().count(),
+                    "text": truncated,
+                }))
+            }
+            Ok(None) => ok_value(json!({ "id": p.id, "has_body": false })),
+            Err(e) => err_result(e),
+        }
+    }
+
+    #[tool(
+        description = "Search the local paper index by query (hybrid lexical+semantic when the embedding backend is available, lexical otherwise). Returns matching papers (id, title, authors, year, status)."
     )]
     pub fn query_papers(&self, Parameters(p): Parameters<QueryPapersParams>) -> CallToolResult {
         let store = match open_store(&self.ctx.db_path) {
             Ok(s) => s,
             Err(e) => return err_result(e),
         };
-        tool_result!(store.search_papers(&p.query, p.limit))
+        let hybrid = load_config().ok().and_then(|cfg| {
+            crate::application::hybrid_search::HybridSearch::open(
+                &store,
+                cfg.search.as_ref(),
+                crate::application::hybrid_search::index_path_for(&self.ctx.db_path),
+            )
+        });
+        let results = match hybrid {
+            Some(hybrid) => hybrid.search(&store, &p.query, p.limit),
+            None => store.search_papers(&p.query, p.limit),
+        };
+        tool_result!(results)
     }
 
     #[tool(

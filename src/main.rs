@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use research_agent::application::gap_analyzer::GapAnalyzer;
 use research_agent::application::ingest_pipeline::IngestPipeline;
 use research_agent::application::report_generator::ReportGenerator;
-use research_agent::composition::{make_llm_engine, open_store, resolve_db};
+use research_agent::composition::{load_config, make_llm_engine, open_store, resolve_db};
 use research_agent::config::{Config, default_config_path};
 use research_agent::domain::paper::{Rating, ReadingStatus};
 use research_agent::domain::research_topic::ResearchTopic;
@@ -27,16 +27,23 @@ enum Commands {
     /// Initialize workspace
     Init,
 
+    /// Import papers from BibTeX/BibLaTeX (.bib) or CSL-JSON (.json) files —
+    /// e.g. a Zotero export. Directory paths import every matching file.
+    Import {
+        /// .bib / .bibtex / .json file(s) or directories
+        paths: Vec<PathBuf>,
+    },
+
     /// Ingest papers from external sources
     Ingest {
         /// Search query (not required for --source pdf)
         query: Option<String>,
 
-        /// Source: arxiv, s2, all, or pdf
+        /// Source: arxiv, s2, openalex, all, or pdf
         #[arg(long, default_value = "all")]
         source: String,
 
-        /// Maximum papers to fetch (arxiv/s2)
+        /// Maximum papers to fetch (arxiv/s2/openalex)
         #[arg(long, default_value_t = 10)]
         limit: usize,
 
@@ -105,6 +112,10 @@ enum Commands {
         /// Rating 1–5
         #[arg(long)]
         rating: Option<u8>,
+
+        /// Print the stored body text instead of updating anything
+        #[arg(long)]
+        body: bool,
     },
 
     /// Start the stdio MCP server (agent-driven mode; the primary interface for
@@ -151,6 +162,7 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Init => cmd_init(db)?,
+        Commands::Import { paths } => cmd_import(db, paths)?,
         Commands::Ingest {
             query,
             source,
@@ -164,7 +176,12 @@ async fn main() -> Result<()> {
         Commands::Report { title, topic } => cmd_report(db, title, topic).await?,
         Commands::Topics { action } => cmd_topics(db, action)?,
         Commands::Status => cmd_status(db)?,
-        Commands::Read { id, status, rating } => cmd_read(db, id, status, rating)?,
+        Commands::Read {
+            id,
+            status,
+            rating,
+            body,
+        } => cmd_read(db, id, status, rating, body)?,
         #[cfg(feature = "mcp")]
         Commands::Mcp => cmd_serve(db).await?,
     }
@@ -177,6 +194,7 @@ fn cmd_init(db_path: PathBuf) -> Result<()> {
     let config = Config {
         database_path: db_path.clone(),
         llm: None,
+        search: None,
     };
     config.save(&config_path)?;
     let store = open_store(&db_path)?;
@@ -209,8 +227,11 @@ async fn cmd_ingest(
         } else {
             for p in &paths {
                 match src.ingest_file(p) {
-                    Ok(paper) => {
+                    Ok((paper, body)) => {
                         store.insert_paper(&paper)?;
+                        if let Some(body) = body {
+                            store.set_paper_body(&paper.id, &body)?;
+                        }
                         println!("Ingested PDF: {}", paper.title);
                         all_papers.push(paper);
                     }
@@ -240,6 +261,14 @@ async fn cmd_ingest(
             println!("Ingested {} papers from Semantic Scholar", papers.len());
             all_papers.extend(papers);
         }
+
+        if source == "openalex" || source == "all" {
+            let oa = research_agent::adapters::openalex_source::OpenAlexSource::new();
+            let pipeline = IngestPipeline::new(&oa, &store);
+            let papers = pipeline.run(&q, limit).await?;
+            println!("Ingested {} papers from OpenAlex", papers.len());
+            all_papers.extend(papers);
+        }
     }
 
     if let Some(topic_id) = &topic {
@@ -258,10 +287,39 @@ async fn cmd_ingest(
     Ok(())
 }
 
+fn cmd_import(db: PathBuf, paths: Vec<PathBuf>) -> Result<()> {
+    let store = open_store(&db)?;
+    let mut total_imported = 0usize;
+    let mut total_skipped = 0usize;
+    let mut total_failed = 0usize;
+
+    for path in &paths {
+        let summary = research_agent::application::paper_import::run_import(&store, path)?;
+        for paper in &summary.imported {
+            println!("Imported: {}", paper.title);
+        }
+        for failure in &summary.failed {
+            eprintln!("Warning: {failure}");
+        }
+        total_imported += summary.imported.len();
+        total_skipped += summary.skipped_duplicates;
+        total_failed += summary.failed.len();
+    }
+
+    println!(
+        "Total: {total_imported} imported, {total_skipped} duplicate(s) skipped, {total_failed} file(s) failed"
+    );
+    Ok(())
+}
+
 fn cmd_index(db: PathBuf, rebuild: bool) -> Result<()> {
     let store = open_store(&db)?;
     if rebuild {
         store.rebuild_index()?;
+        let hybrid = open_hybrid(&store, &db);
+        if let Some(mut hybrid) = hybrid {
+            hybrid.rebuild(&store)?;
+        }
         println!("Index rebuilt.");
     } else {
         println!("Index is auto-maintained. Use --rebuild to force.");
@@ -269,9 +327,26 @@ fn cmd_index(db: PathBuf, rebuild: bool) -> Result<()> {
     Ok(())
 }
 
+/// Best-effort hybrid search stack: `None` (lexical-only fallback) when the
+/// embedding backend or index is unavailable. Never surfaces errors.
+fn open_hybrid(
+    store: &research_agent::adapters::sqlite_store::SqliteStore,
+    db_path: &std::path::Path,
+) -> Option<research_agent::application::hybrid_search::HybridSearch> {
+    let cfg = load_config().ok()?.search;
+    research_agent::application::hybrid_search::HybridSearch::open(
+        store,
+        cfg.as_ref(),
+        research_agent::application::hybrid_search::index_path_for(db_path),
+    )
+}
+
 fn cmd_query(db: PathBuf, query: String, limit: usize) -> Result<()> {
     let store = open_store(&db)?;
-    let results = store.search_papers(&query, limit)?;
+    let results = match open_hybrid(&store, &db) {
+        Some(hybrid) => hybrid.search(&store, &query, limit)?,
+        None => store.search_papers(&query, limit)?,
+    };
     if results.is_empty() {
         println!("No papers found for '{query}'.");
     } else {
@@ -436,7 +511,13 @@ fn cmd_status(db: PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn cmd_read(db: PathBuf, id: String, status: Option<String>, rating: Option<u8>) -> Result<()> {
+fn cmd_read(
+    db: PathBuf,
+    id: String,
+    status: Option<String>,
+    rating: Option<u8>,
+    body: bool,
+) -> Result<()> {
     let store = open_store(&db)?;
     let mut updated = false;
 
@@ -446,6 +527,22 @@ fn cmd_read(db: PathBuf, id: String, status: Option<String>, rating: Option<u8>)
         Some(r) => Some(Rating::new(r)?),
         None => None,
     };
+
+    if body {
+        if status.is_some() || rating.is_some() {
+            anyhow::bail!("--body cannot be combined with --status/--rating");
+        }
+        return match store.get_paper_body(&id)? {
+            Some(body) => {
+                println!("{body}");
+                Ok(())
+            }
+            None => {
+                println!("No stored body for paper {id}.");
+                Ok(())
+            }
+        };
+    }
 
     if let Some(s) = status {
         let rs = ReadingStatus::from_str_lossy(&s);

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **OpenAlex source**: `research ingest --source openalex` (and `ingest` MCP source `openalex`) searches 250M+ works via the free, keyless OpenAlex API; abstracts are reconstructed from the inverted index, and papers carry a new `openalex_id` field (automatic schema migration to version 2).
+- **BibTeX/CSL-JSON import**: `research import <file|dir>` and the MCP `import_papers` tool parse `.bib`/`.bibtex`/`.json` files — e.g. a Zotero export. Papers whose DOI is already in the library are skipped; per-file failures are reported without blocking the batch.
+- **Hybrid search**: `research query` and `query_papers` now fuse FTS5 lexical hits with semantic hits from a local vector index (llm-kernel `TurbovecIndex`, RRF fusion), persisted at `~/.research/embeddings.idx` and rebuilt automatically when stale (`research index --rebuild` forces it). The default embedding backend is a bundled small ONNX model (BGESmallENV15, 384-dim) using CoreML on Apple Silicon, DirectML on Windows, CPU elsewhere; `[search]` in `config.toml` switches to OpenAI (BYOK) or a different local model. Every failure degrades gracefully to lexical-only search.
+- **Full-body storage for PDFs**: PDF ingest no longer discards the extracted text — the body is section-marked (`## Heading`) and stored in a separate `paper_bodies` table, searched by FTS5 and embedded for hybrid search. Read it back with `research read <id> --body` or the MCP `paper_body` tool (tool responses are capped at 40k chars).
+- MCP tools `import_papers` and `paper_body` (13 → 15 tools).
+
+### Changed
+- Release targets drop the two `*-musl` platforms: the bundled ONNX runtime has no musl prebuilts and requires glibc ≥ 2.38 (Linux binaries now target Ubuntu 24.04+).
+
 ## [0.1.0] - Unreleased
 
 ### Fixed

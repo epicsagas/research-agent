@@ -13,16 +13,15 @@ ci = "github"
 installers = ["shell", "powershell", "homebrew"]
 # Homebrew tap repository (auto-published by cargo-dist on release).
 tap = "epicsagas/homebrew-tap"
-# Target platforms. musl is safe: rusqlite uses the `bundled` feature (static
-# libsqlite3-sys) and lopdf/pdf-extract are pure Rust — no glibc-linked native
-# dependency. ARM64 (Apple Silicon + Graviton) included per epicsagas standard.
+# Target platforms. musl targets are dropped: the local ONNX embedding runtime
+# (llm-kernel `embedding-fastembed`, static ort) has no musl prebuilt archive
+# and needs glibc >= 2.38 at runtime. ARM64 (Apple Silicon + Graviton) included
+# per epicsagas standard.
 targets = [
   "aarch64-apple-darwin",
   "aarch64-unknown-linux-gnu",
-  "aarch64-unknown-linux-musl",
   "x86_64-apple-darwin",
   "x86_64-unknown-linux-gnu",
-  "x86_64-unknown-linux-musl",
   "x86_64-pc-windows-msvc",
 ]
 # We carry hand-customized install.sh / install.ps1 (the plugin's SessionStart
@@ -40,4 +39,3 @@ publish-jobs = ["homebrew"]
 
 [dist.github-custom-runners]
 aarch64-unknown-linux-gnu = "ubuntu-24.04-arm"
-aarch64-unknown-linux-musl = "ubuntu-24.04-arm"

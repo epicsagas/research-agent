@@ -18,11 +18,50 @@ impl LlmConfig {
     }
 }
 
+/// Hybrid-search configuration. Absent section = local ONNX defaults.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchConfig {
+    /// "local" (bundled ONNX, default) or "openai" (remote, BYOK).
+    #[serde(default = "search_provider_default")]
+    pub provider: String,
+    /// Local model id (llm-kernel `EmbeddingModel`). Small by default so
+    /// low-VRAM machines and CPU-only hosts stay fast.
+    #[serde(default = "search_model_default")]
+    pub model: String,
+    /// Env var holding the OpenAI key when provider = "openai".
+    #[serde(default = "search_key_env_default")]
+    pub openai_api_key_env: String,
+}
+
+fn search_provider_default() -> String {
+    "local".into()
+}
+fn search_model_default() -> String {
+    "BGESmallENV15".into()
+}
+fn search_key_env_default() -> String {
+    "OPENAI_API_KEY".into()
+}
+
+impl Default for SearchConfig {
+    fn default() -> Self {
+        Self {
+            provider: search_provider_default(),
+            model: search_model_default(),
+            openai_api_key_env: search_key_env_default(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub database_path: PathBuf,
     #[serde(default)]
     pub llm: Option<LlmConfig>,
+    /// Hybrid (lexical + vector) search config. Optional; missing section uses
+    /// local defaults.
+    #[serde(default)]
+    pub search: Option<SearchConfig>,
 }
 
 /// Returns `~/.research` on all platforms (Windows: `C:\Users\<user>\.research`).
@@ -45,6 +84,7 @@ impl Default for Config {
         Self {
             database_path: default_db_path(),
             llm: None,
+            search: None,
         }
     }
 }
@@ -92,6 +132,7 @@ mod tests {
         let config = Config {
             database_path: PathBuf::from("/tmp/test.db"),
             llm: None,
+            search: None,
         };
         config.save(&path).unwrap();
         let loaded = Config::load(&path).unwrap();
@@ -119,6 +160,7 @@ mod tests {
                 api_key_env: "ANTHROPIC_API_KEY".into(),
                 base_url: None,
             }),
+            search: None,
         };
         config.save(&path).unwrap();
         let loaded = Config::load(&path).unwrap();
