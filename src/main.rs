@@ -110,7 +110,8 @@ enum Commands {
     /// Start the stdio MCP server (agent-driven mode; the primary interface for
     /// MCP hosts like Claude Code/Codex). Gated behind the `mcp` feature.
     #[cfg(feature = "mcp")]
-    Serve,
+    #[command(alias = "serve")]
+    Mcp,
 }
 
 #[derive(Subcommand)]
@@ -165,7 +166,7 @@ async fn main() -> Result<()> {
         Commands::Status => cmd_status(db)?,
         Commands::Read { id, status, rating } => cmd_read(db, id, status, rating)?,
         #[cfg(feature = "mcp")]
-        Commands::Serve => cmd_serve(db).await?,
+        Commands::Mcp => cmd_serve(db).await?,
     }
 
     Ok(())

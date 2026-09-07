@@ -3,7 +3,10 @@
 research-agent — personal long-term research assistant: CLI + stdio MCP server
 that indexes papers (arXiv, Semantic Scholar, local PDFs) into SQLite with FTS5,
 tracks a topic hierarchy, runs LLM knowledge-gap analysis and report generation.
-Also ships as a Claude/Codex plugin exposing 11 MCP tools.
+Also ships as a plugin for Claude Code, Codex, Antigravity and Grok Build,
+exposing 13 MCP tools. Gap analysis and reports are agent-native: tools hand
+over structured topic state and persist what the host model concludes; the
+optional `[llm]` config only powers the standalone CLI.
 
 ## Commands
 
@@ -12,7 +15,7 @@ Also ships as a Claude/Codex plugin exposing 11 MCP tools.
 - Lint: `cargo clippy --all-targets -- -D warnings` | Format: `cargo fmt --all --check` / `cargo fmt`
 - Audit: `cargo audit`
 - Run: `cargo run -- --db /tmp/r.db init`, then `ingest <query>`, `status`;
-- MCP: `cargo run -- serve` (stdio JSON-RPC; 11 tools)
+- MCP: `cargo run -- mcp` (stdio JSON-RPC; 13 tools)
 - Release: `dist generate` after editing `dist-workspace.toml`; releases fire on
   a pushed `vX.Y.Z` tag
 

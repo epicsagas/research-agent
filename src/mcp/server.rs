@@ -25,10 +25,10 @@ use crate::adapters::arxiv_source::ArxivSource;
 use crate::adapters::pdf_source::PdfSource;
 use crate::adapters::semantic_scholar_source::SemanticScholarSource;
 use crate::adapters::sqlite_store::SqliteStore;
-use crate::application::gap_analyzer::GapAnalyzer;
+use crate::application::gap_analyzer::{collect_brief, record_gaps};
 use crate::application::ingest_pipeline::IngestPipeline;
-use crate::application::report_generator::ReportGenerator;
-use crate::composition::{load_config, make_llm_engine, open_store};
+use crate::application::report_generator::{collect_material, save_report};
+use crate::composition::{load_config, open_store};
 use crate::domain::paper::{Paper, Rating, ReadingStatus};
 use crate::domain::research_topic::ResearchTopic;
 use crate::error::ResearchError;
@@ -280,26 +280,30 @@ impl ResearchServer {
     }
 
     #[tool(
-        description = "Run LLM knowledge-gap analysis for a topic. Requires a configured [llm] in config.toml. Returns identified gaps."
+        description = "Collect a topic brief: the topic, its papers with reading status, recorded gaps, and coverage state. Analyze this data yourself, then persist your findings with gaps_record."
     )]
-    pub async fn analyze_gaps(
-        &self,
-        Parameters(p): Parameters<AnalyzeGapsParams>,
-    ) -> CallToolResult {
+    pub fn topic_brief(&self, Parameters(p): Parameters<TopicBriefParams>) -> CallToolResult {
         let store = match open_store(&self.ctx.db_path) {
             Ok(s) => s,
             Err(e) => return err_result(e),
         };
-        let inner = match open_store(&self.ctx.db_path) {
+        tool_result!(collect_brief(&store, &p.topic))
+    }
+
+    #[tool(
+        description = "Record knowledge gaps you identified for a topic. Each gap is {description, gap_type?, priority?} where gap_type is one of missing_literature | unanswered_question | methodology_gap | connection_gap and priority is 0..=1."
+    )]
+    pub fn gaps_record(&self, Parameters(p): Parameters<GapsRecordParams>) -> CallToolResult {
+        let store = match open_store(&self.ctx.db_path) {
             Ok(s) => s,
             Err(e) => return err_result(e),
         };
-        let engine = match make_llm_engine(inner) {
-            Ok(e) => e,
-            Err(e) => return err_result(e),
-        };
-        let analyzer = GapAnalyzer::new(&engine, &store);
-        tool_result!(analyzer.analyze(&p.topic).await)
+        let gaps: Vec<(String, Option<String>, Option<f32>)> = p
+            .gaps
+            .into_iter()
+            .map(|g| (g.description, g.gap_type, g.priority))
+            .collect();
+        tool_result!(record_gaps(&store, &p.topic, &gaps))
     }
 
     #[tool(description = "List recorded knowledge gaps, optionally filtered by topic id.")]
@@ -312,30 +316,31 @@ impl ResearchServer {
     }
 
     #[tool(
-        description = "Generate a research report (markdown + metadata) over comma-separated topic ids. Requires a configured [llm]."
+        description = "Collect source material for a report: topic briefs (papers, gaps, coverage) for comma-separated topic ids. Draft the markdown yourself, then store it with report_save."
     )]
-    pub async fn generate_report(
-        &self,
-        Parameters(p): Parameters<GenerateReportParams>,
-    ) -> CallToolResult {
+    pub fn report_material(&self, Parameters(p): Parameters<ReportTopicParams>) -> CallToolResult {
         let store = match open_store(&self.ctx.db_path) {
             Ok(s) => s,
             Err(e) => return err_result(e),
         };
-        let inner = match open_store(&self.ctx.db_path) {
+        let topic_ids: Vec<String> = p.topics.split(',').map(|t| t.trim().to_string()).collect();
+        tool_result!(collect_material(&store, &topic_ids))
+    }
+
+    #[tool(
+        description = "Store an agent-authored markdown report. Sections are split on '## ' headings. Returns the report id and metadata."
+    )]
+    pub fn report_save(&self, Parameters(p): Parameters<ReportSaveParams>) -> CallToolResult {
+        let store = match open_store(&self.ctx.db_path) {
             Ok(s) => s,
             Err(e) => return err_result(e),
         };
-        let engine = match make_llm_engine(inner) {
-            Ok(e) => e,
-            Err(e) => return err_result(e),
-        };
-        let generator = ReportGenerator::new(&engine, &store);
-        let topic_ids: Vec<String> = p.topic.split(',').map(String::from).collect();
-        match generator.generate(&p.title, &topic_ids).await {
+        let topic_ids: Vec<String> = p.topics.split(',').map(|t| t.trim().to_string()).collect();
+        match save_report(&store, &p.title, &topic_ids, &p.markdown) {
             Ok(report) => ok_value(json!({
                 "id": report.id,
                 "title": report.title,
+                "sections": report.sections.len(),
                 "markdown": report.to_markdown(),
             })),
             Err(e) => err_result(e),
@@ -485,7 +490,7 @@ impl ServerHandler for ResearchServer {
             .build();
         info.instructions = Some(
             "research-agent: personal academic research memory. Drive the flow: \
-             init, ingest, query_papers, analyze_gaps, then generate_report. \
+             init, ingest, query_papers, topic_brief, gaps_record, then report_material and report_save. \
              Organize with topics_list/topic_add, check the overview with state, \
              and track progress with update_read."
                 .into(),

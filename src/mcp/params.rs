@@ -39,9 +39,29 @@ pub struct QueryPapersParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-pub struct AnalyzeGapsParams {
-    /// Topic id to analyze for knowledge gaps.
+pub struct TopicBriefParams {
+    /// Topic id to collect.
     pub topic: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct GapInput {
+    /// What the library is missing, in one sentence.
+    pub description: String,
+    /// missing_literature | unanswered_question | methodology_gap | connection_gap
+    #[serde(default)]
+    pub gap_type: Option<String>,
+    /// 0.0–1.0 (default 0.5).
+    #[serde(default)]
+    pub priority: Option<f32>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct GapsRecordParams {
+    /// Topic id the gaps belong to.
+    pub topic: String,
+    /// The gaps to record.
+    pub gaps: Vec<GapInput>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -52,12 +72,19 @@ pub struct ListGapsParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-pub struct GenerateReportParams {
-    /// Report title (default "Research Report").
-    #[serde(default = "default_title")]
-    pub title: String,
+pub struct ReportTopicParams {
     /// Comma-separated topic ids.
-    pub topic: String,
+    pub topics: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ReportSaveParams {
+    /// Report title.
+    pub title: String,
+    /// Comma-separated topic ids the report covers.
+    pub topics: String,
+    /// Full markdown. Sections split on '## ' headings.
+    pub markdown: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -90,7 +117,4 @@ fn default_limit() -> usize {
 }
 fn default_query_limit() -> usize {
     20
-}
-fn default_title() -> String {
-    "Research Report".to_string()
 }

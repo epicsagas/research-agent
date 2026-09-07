@@ -7,17 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.1] — 2026-07-03
+## [0.1.0] - Unreleased
 
 ### Fixed
 - **Topic-scoped analysis**: `analyze_gaps` and `generate_report` now build their LLM context from papers belonging to the requested topic only. Previously both called `list_papers(N)` returning arbitrary recent papers, so gap analysis and reports described the wrong papers (and `generate_report` emitted the same 5 arbitrary papers for every topic). Adds `IndexStore::list_papers_by_topic`; empty topics return an explicit placeholder instead of leaking unlinked papers.
 - Pre-existing `cargo fmt` violations in `src/config.rs` and `src/mcp/server.rs` resolved.
 
 ### Added
+- Paper indexing with arXiv and Semantic Scholar source adapters
+- SQLite storage with FTS5 full-text search
+- Research topic management with hierarchical trees
+- Knowledge gap analysis
+- Research report generation
+- Reading status tracking
+- CLI with init, ingest, index, query, gaps, report, topics, status, read commands
 - **Release pipeline (cargo-dist 0.31.0)**: `dist-workspace.toml` (SSOT) + generated `.github/workflows/release.yml`. Builds 7 targets (Linux gnu/musl, macOS Intel/ARM, Windows) with shell + PowerShell + Homebrew installers. Git tag `vX.Y.Z` triggers the release; the hand-written `install.sh`/`install.ps1` are injected into release artifacts so the plugin's auto-installer works.
-- README now follows the epicsagas install standard (curl → irm → Homebrew → cargo-binstall → cargo install) with a matching Updating table.
-- `readme = "README.md"` package metadata (required for crates.io publish).
-- **MCP stdio server** (`research serve`): exposes research-agent as 11 MCP tools (init, ingest, index_rebuild, query_papers, analyze_gaps, list_gaps, generate_report, topics_list, topic_add, state, update_read) so an LLM agent can drive the research flow directly. Adaptive dispatch: MCP is the primary interface for MCP hosts, CLI is the fallback for terminals/CI.
+- README now follows the epicsagas install standard (curl → irm → Homebrew) with a matching Updating table.
+- **MCP stdio server** (`research mcp`): exposes research-agent as 13 MCP tools (init, ingest, index_rebuild, query_papers, topic_brief, gaps_record, list_gaps, report_material, report_save, topics_list, topic_add, state, update_read) so an AI agent can drive the research flow directly. Adaptive dispatch: MCP is the primary interface for MCP hosts, CLI is the fallback for terminals/CI.
 - `mcp` cargo feature (on by default): gates `rmcp` + `schemars`. Build CLI-only with `--no-default-features`.
 - Plugin layer: `mcp_config.json`, `.claude-plugin/hooks.json` (SessionStart auto-install via `registry/scripts/install.js`), and cross-platform `install.sh` / `install.ps1`.
 - Real arXiv API integration: `ArxivSource` now calls the Atom XML endpoint (`export.arxiv.org/api/query`) and parses results via `quick-xml`
@@ -33,19 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Upgraded `llm-kernel` from `0.9.x` to `0.10` (0.10.0 released). This project consumes only the default provider catalog, which is unchanged in 0.10.0 — no behavior regression. Closes #10.
-- README restructured to the epicsagas install standard (curl → irm → Homebrew → cargo-binstall → cargo install) with a matching Updating table and an MCP-server section.
+- README restructured to the epicsagas install standard (curl → irm → Homebrew) with a matching Updating table and an MCP-server section.
 - `SqliteStore::open` now sets a 5s `busy_timeout`, so concurrent handles (e.g. parallel MCP tool calls each running `init_schema`) no longer surface "database is locked".
 - `research ingest` query argument is now optional (not required when `--source pdf`)
 - `research topics` now uses subcommands: `topics list` and `topics add <name>`
 - `research topics list` now indents sub-topics by depth (2 spaces per level)
-
-## [0.1.0] - 2025-06-05
-
-### Added
-- Paper indexing with arXiv and Semantic Scholar source adapters
-- SQLite storage with FTS5 full-text search
-- Research topic management with hierarchical trees
-- Knowledge gap analysis
-- Research report generation
-- Reading status tracking
-- CLI with init, ingest, index, query, gaps, report, topics, status, read commands

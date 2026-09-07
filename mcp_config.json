@@ -2,7 +2,7 @@
   "mcpServers": {
     "research": {
       "command": "research",
-      "args": ["serve"]
+      "args": ["mcp"]
     }
   }
 }
