@@ -54,13 +54,14 @@ claude plugin install research-agent@research-agent
 
 ```bash
 codex plugin marketplace add epicsagas/research-agent
-codex plugin add research-agent
+codex plugin add research-agent@research-agent
 ```
 
 ### Antigravity (agy)
 
 ```bash
-git clone https://github.com/epicsagas/research-agent ~/.gemini/config/plugins/research-agent
+agy plugin install https://github.com/epicsagas/research-agent
+agy plugin enable research-agent
 ```
 
 ### Grok Build
@@ -68,6 +69,20 @@ git clone https://github.com/epicsagas/research-agent ~/.gemini/config/plugins/r
 ```bash
 grok plugin install epicsagas/research-agent --trust
 ```
+
+### Hermes Agent
+
+```bash
+hermes plugins install https://github.com/epicsagas/research-agent
+hermes plugins enable research-agent
+```
+
+Hermes loads the root `plugin.yaml` and `register(ctx)` in `__init__.py`.
+It has no MCP support, so the agent drives `research` through the bundled
+skill's CLI commands — install the binary first (`brew install
+epicsagas/tap/research-agent` or the curl installer); the SessionStart
+auto-install hook does not apply to hermes. If skills_guard blocks the
+install scan, set `plugins.scan_on_install: false` in the hermes config.
 
 The plugin auto-installs the `research` binary on session start and exposes
 13 MCP tools, so the agent can ingest, search, analyze with its own model, and file reports on its own.
@@ -166,7 +181,7 @@ workspaces.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). PRs welcome.
+See [CONTRIBUTING.md](CONTRIBUTING.md) and the [ROADMAP](ROADMAP.md). PRs welcome.
 
 ## License
 
