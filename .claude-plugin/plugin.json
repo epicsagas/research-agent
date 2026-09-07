@@ -1,0 +1,33 @@
+{
+  "name": "research-agent",
+  "version": "0.1.2",
+  "description": "Personal academic research assistant — arXiv/Semantic-Scholar ingestion, topic hierarchy, LLM gap analysis and reports, and paper ratings.",
+  "author": {
+    "name": "epicsagas",
+    "url": "https://github.com/epicsagas"
+  },
+  "homepage": "https://github.com/epicsagas/research-agent",
+  "repository": "https://github.com/epicsagas/research-agent",
+  "license": "Apache-2.0",
+  "keywords": [
+    "research",
+    "arxiv",
+    "papers",
+    "literature",
+    "semantic-scholar",
+    "gap-analysis",
+    "pdf"
+  ],
+  "skills": "./skills/",
+  "agents": ["./agents/research-analyst.md"],
+  "mcpServers": ["./mcp_config.json"],
+  "interface": {
+    "displayName": "Research Agent",
+    "shortDescription": "Academic research assistant — ingest arXiv/S2 papers, find gaps, generate reports.",
+    "longDescription": "Rust CLI for personal academic research: ingest papers from arXiv, Semantic Scholar, or local PDFs; organize them in a topic hierarchy; run LLM gap analysis and report generation; track reading status and 1-5 ratings. Single binary, local SQLite index, real LLM via research.toml [llm] config.",
+    "developerName": "epicsagas",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://github.com/epicsagas/research-agent"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "research-agent",
+  "owner": {
+    "name": "epicsagas",
+    "url": "https://github.com/epicsagas"
+  },
+  "metadata": {
+    "description": "Personal academic research assistant plugin."
+  },
+  "plugins": [
+    {
+      "name": "research-agent",
+      "source": "./",
+      "description": "research-agent — ingest arXiv/S2/PDF papers, run LLM gap analysis and reports, all via MCP tools."
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+[workspace]
+members = ["cargo:."]
+
+# Config for 'dist'
+[dist]
+# The preferred dist version to use in CI (Cargo.toml SemVer syntax)
+cargo-dist-version = "0.31.0"
+# CI backends to support
+ci = "github"
+# The installers to generate for each app. Homebrew is included per the epicsagas
+# standard (epicsagas/homebrew-tap exists); shell + powershell are the universal
+# curl|sh and irm|iex fallbacks.
+installers = ["shell", "powershell", "homebrew"]
+# Homebrew tap repository (auto-published by cargo-dist on release).
+tap = "epicsagas/homebrew-tap"
+# Target platforms. musl is safe: rusqlite uses the `bundled` feature (static
+# libsqlite3-sys) and lopdf/pdf-extract are pure Rust — no glibc-linked native
+# dependency. ARM64 (Apple Silicon + Graviton) included per epicsagas standard.
+targets = [
+  "aarch64-apple-darwin",
+  "aarch64-unknown-linux-gnu",
+  "aarch64-unknown-linux-musl",
+  "x86_64-apple-darwin",
+  "x86_64-unknown-linux-gnu",
+  "x86_64-unknown-linux-musl",
+  "x86_64-pc-windows-msvc",
+]
+# We carry hand-customized install.sh / install.ps1 (the plugin's SessionStart
+# auto-installer downloads them under these fixed filenames) that we inject into
+# the release artifacts, so skip ci freshness checks. Mirrors the BYOH pattern.
+allow-dirty = ["ci"]
+# Whether to sign macOS executables (enable once 3 CODESIGN_* secrets exist)
+macos-sign = false
+# Path that installers should place binaries in
+install-path = "CARGO_HOME"
+# Whether to install an updater program
+install-updater = false
+# Publish the Homebrew formula to the tap on release.
+publish-jobs = ["homebrew"]
+
+[dist.github-custom-runners]
+aarch64-unknown-linux-gnu = "ubuntu-24.04-arm"
+aarch64-unknown-linux-musl = "ubuntu-24.04-arm"

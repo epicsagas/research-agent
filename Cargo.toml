@@ -1,0 +1,86 @@
+[package]
+name = "research-agent"
+version = "0.1.2"
+edition = "2024"
+description = "Long-term research assistant: index papers, articles, and PDFs"
+repository = "https://github.com/epicsagas/research-agent"
+license = "Apache-2.0"
+homepage = "https://github.com/epicsagas/research-agent"
+readme = "README.md"
+rust-version = "1.92"
+keywords = ["research", "papers", "knowledge-gap", "academic", "arxiv"]
+categories = ["command-line-utilities", "science"]
+
+[[bin]]
+name = "research"
+path = "src/main.rs"
+
+[lib]
+name = "research_agent"
+path = "src/lib.rs"
+
+[features]
+# `mcp` is on by default: the stdio MCP server (`research serve`) is a
+# first-class interface (agent-driven; the CLI is secondary), and the shipped
+# plugin's mcp_config.json calls it. Default-on also ensures cargo-dist release
+# binaries support `serve` out of the box. tokio is already non-optional (the CLI
+# is async), so this feature only gates rmcp + schemars.
+default = ["mcp"]
+mcp = ["dep:rmcp", "dep:schemars"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1.0"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "net"] }
+toml = "1"
+rusqlite = { version = "0.40", features = ["bundled"] }
+chrono = { version = "0.4", features = ["clock"] }
+regex = "1.12"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4"] }
+async-trait = "0.1"
+llm-kernel = { version = "0.31", features = ["client-async", "safety", "tokens"] }
+reqwest = { version = "0.13", features = ["json", "rustls"], default-features = false }
+quick-xml = { version = "0.42", features = ["serialize"] }
+pdf-extract = "0.12"
+dirs = "6"
+
+# MCP stdio server (`research serve`) — exposes research-agent as MCP tools so an
+# LLM agent can drive ingestion/gaps/reports. OPTIONAL via the `mcp` feature.
+rmcp = { version = "3.2", optional = true, features = ["server", "macros", "transport-io"] }
+schemars = { version = "1", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.dev]
+opt-level = 0
+debug = 1
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+
+[profile.release.package."*"]
+opt-level = 3
+codegen-units = 4
+
+[profile.dist]
+inherits = "release"
+lto = "thin"
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }.tar.xz"
+pkg-fmt = "txz"
+bin-dir = "{ name }-{ target }/{ bin }"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"
+bin-dir = "{ bin }.exe"
