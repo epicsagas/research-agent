@@ -44,8 +44,4 @@ library can move in.
 
 ## Non-goals
 
-- Hosted service or accounts — research-agent stays a local tool your agent
-  runs
 - Bundling an LLM — analysis belongs to the calling agent
-- Replacing a reference manager — it imports from them; it is the agent-side
-  memory on top
