@@ -42,6 +42,16 @@ library can move in.
   exists
 - **PubMed source** — for biomedical topics
 
+## Platform
+
+- **First tagged release** — `v0.1.0` with prebuilt binaries so the
+  SessionStart auto-install works for new users
+- **Plugin matrix** — keep Claude Code, Codex, Antigravity, Grok Build and
+  Hermes install paths verified on every release
+- **Installer & updater** — refresh the install scripts and make the
+  SessionStart hook upgrade smoothly against new tags
+- **Docs** — consolidate the product intro page into this repository
+
 ## Non-goals
 
 - Bundling an LLM — analysis belongs to the calling agent
