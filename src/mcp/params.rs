@@ -48,6 +48,9 @@ pub struct PaperBodyParams {
 pub struct PaperReferencesParams {
     /// Paper id.
     pub id: String,
+    /// Direction: "references" (default, works the paper cites) or
+    /// "cited_by" (works citing the paper).
+    pub direction: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

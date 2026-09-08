@@ -360,12 +360,21 @@ impl ResearchServer {
     }
 
     #[tool(
-        description = "Fetch and store the references (citation graph edges) of a paper via OpenAlex, ingesting newly seen referenced papers into the library. Requires the paper to have an OpenAlex id or DOI. Idempotent. Network-heavy (async)."
+        description = "Fetch and store citation-graph edges for a paper via OpenAlex, ingesting newly seen related papers into the library. direction \"references\" (default) lists the works the paper cites; \"cited_by\" lists the works citing it. Requires the paper to have an OpenAlex id or DOI. Idempotent. Network-heavy (async)."
     )]
     pub async fn paper_references(
         &self,
         Parameters(p): Parameters<PaperReferencesParams>,
     ) -> CallToolResult {
+        let cited_by = match p.direction.as_deref() {
+            None | Some("references") => false,
+            Some("cited_by") => true,
+            Some(other) => {
+                return err_result(ResearchError::Source(format!(
+                    "unknown direction '{other}'; use \"references\" or \"cited_by\""
+                )));
+            }
+        };
         let store = match open_store(&self.ctx.db_path) {
             Ok(s) => s,
             Err(e) => return err_result(e),
@@ -373,23 +382,39 @@ impl ResearchServer {
         let paper = match store.get_paper(&p.id) {
             Ok(Some(paper)) => paper,
             Ok(None) => {
-                return err_result(ResearchError::NotFound(format!("paper '{}' not found", p.id)))
+                return err_result(ResearchError::NotFound(format!(
+                    "paper '{}' not found",
+                    p.id
+                )));
             }
             Err(e) => return err_result(e),
         };
-        match crate::application::references::sync_references(&store, &paper).await {
-            Ok((papers, new_edges, new_papers)) => match store.citations_for_paper(&p.id) {
-                Ok(edges) => ok_value(json!({
-                    "id": p.id,
-                    "references": edges.len(),
-                    "new_edges": new_edges,
-                    "new_papers_count": new_papers,
-                    // Resolved reference papers (metadata only); already-known
-                    // entries are included so the agent can see the full list.
-                    "referenced_papers": papers,
-                })),
-                Err(e) => err_result(e),
-            },
+        let synced = if cited_by {
+            crate::application::references::sync_cited_by(&store, &paper).await
+        } else {
+            crate::application::references::sync_references(&store, &paper).await
+        };
+        match synced {
+            Ok((papers, new_edges, new_papers)) => {
+                let edges = if cited_by {
+                    store.citations_citing_paper(&p.id)
+                } else {
+                    store.citations_for_paper(&p.id)
+                };
+                match edges {
+                    Ok(edges) => ok_value(json!({
+                        "id": p.id,
+                        "direction": if cited_by { "cited_by" } else { "references" },
+                        "edges": edges.len(),
+                        "new_edges": new_edges,
+                        "new_papers_count": new_papers,
+                        // Resolved related papers (metadata only); already-known
+                        // entries are included so the agent can see the full list.
+                        "related_papers": papers,
+                    })),
+                    Err(e) => err_result(e),
+                }
+            }
             Err(e) => err_result(e),
         }
     }

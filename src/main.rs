@@ -77,6 +77,9 @@ enum Commands {
     References {
         /// Paper ID
         id: String,
+        /// List the works citing this paper instead of its references
+        #[arg(long)]
+        cited_by: bool,
     },
 
     /// Analyze knowledge gaps
@@ -178,7 +181,7 @@ async fn main() -> Result<()> {
         } => cmd_ingest(db, query, source, limit, path, topic).await?,
         Commands::Index { rebuild } => cmd_index(db, rebuild)?,
         Commands::Query { query, limit } => cmd_query(db, query, limit)?,
-        Commands::References { id } => cmd_references(db, id).await?,
+        Commands::References { id, cited_by } => cmd_references(db, id, cited_by).await?,
         Commands::Gaps { topic } => cmd_gaps(db, topic).await?,
         Commands::Report { title, topic } => cmd_report(db, title, topic).await?,
         Commands::Topics { action } => cmd_topics(db, action)?,
@@ -389,7 +392,7 @@ fn cmd_query(db: PathBuf, query: String, limit: usize) -> Result<()> {
     Ok(())
 }
 
-async fn cmd_references(db: PathBuf, id: String) -> Result<()> {
+async fn cmd_references(db: PathBuf, id: String, cited_by: bool) -> Result<()> {
     let store = open_store(&db)?;
     let paper = store
         .get_paper(&id)?
@@ -398,32 +401,49 @@ async fn cmd_references(db: PathBuf, id: String) -> Result<()> {
     // Fresh fetch; falls back to stored edges when the paper has no OpenAlex
     // identity or the network call fails, so "what should I read next" still
     // answers from earlier syncs.
-    let (_papers, new_edges, new_papers) =
-        match research_agent::application::references::sync_references(&store, &paper).await {
-            Ok((papers, new_edges, new_papers)) => (papers, new_edges, new_papers),
-            Err(e) => {
-                eprintln!("Warning: reference fetch failed ({e}); showing stored edges.");
-                (Vec::new(), 0, 0)
-            }
-        };
+    let (_papers, new_edges, new_papers) = match if cited_by {
+        research_agent::application::references::sync_cited_by(&store, &paper).await
+    } else {
+        research_agent::application::references::sync_references(&store, &paper).await
+    } {
+        Ok((papers, new_edges, new_papers)) => (papers, new_edges, new_papers),
+        Err(e) => {
+            eprintln!("Warning: citation fetch failed ({e}); showing stored edges.");
+            (Vec::new(), 0, 0)
+        }
+    };
 
-    let edges = store.citations_for_paper(&id)?;
+    let label = if cited_by {
+        "citing work(s)"
+    } else {
+        "reference(s)"
+    };
+    let edges = if cited_by {
+        store.citations_citing_paper(&id)?
+    } else {
+        store.citations_for_paper(&id)?
+    };
     if edges.is_empty() {
-        println!("No references known for '{id}'.");
+        println!("No {label} known for '{id}'.");
         return Ok(());
     }
     println!(
-        "{} reference(s) ({} new), ingested {} new paper(s):",
+        "{} {label} ({} new), ingested {} new paper(s):",
         edges.len(),
         new_edges,
         new_papers
     );
     for edge in &edges {
-        let title = match store.get_paper(&edge.cited_paper_id)? {
-            Some(p) => p.title,
-            None => "(paper not in library)".into(),
+        let other_id = if cited_by {
+            &edge.citing_paper_id
+        } else {
+            &edge.cited_paper_id
         };
-        println!("- [{}] {}", edge.cited_paper_id, title);
+        let title = store
+            .get_paper(other_id)?
+            .map(|p| p.title)
+            .unwrap_or_else(|| "(paper not in library)".into());
+        println!("- [{other_id}] {title}");
     }
     Ok(())
 }

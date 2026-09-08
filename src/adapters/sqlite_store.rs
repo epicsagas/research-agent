@@ -664,6 +664,28 @@ impl IndexStore for SqliteStore {
         Ok(citations)
     }
 
+    fn citations_citing_paper(&self, paper_id: &str) -> Result<Vec<Citation>> {
+        let conn = self.conn.lock().map_err(|e| {
+            ResearchError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let mut stmt = conn.prepare(
+            "SELECT citing_paper_id, cited_paper_id, context
+             FROM citations WHERE cited_paper_id = ?1 ORDER BY rowid",
+        )?;
+        let rows = stmt.query_map(params![paper_id], |row| {
+            Ok(Citation {
+                citing_paper_id: row.get(0)?,
+                cited_paper_id: row.get(1)?,
+                context: row.get(2)?,
+            })
+        })?;
+        let mut citations = Vec::new();
+        for c in rows {
+            citations.push(c?);
+        }
+        Ok(citations)
+    }
+
     fn rebuild_index(&self) -> Result<()> {
         let conn = self.conn.lock().map_err(|e| {
             ResearchError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))

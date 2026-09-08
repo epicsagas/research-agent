@@ -62,6 +62,9 @@ pub trait IndexStore: Send + Sync {
     fn insert_citations(&self, citations: &[Citation]) -> Result<usize>;
     /// Reference edges originating from `paper_id`, insertion order.
     fn citations_for_paper(&self, paper_id: &str) -> Result<Vec<Citation>>;
+    /// Citation edges pointing at `paper_id` (works citing it), insertion
+    /// order.
+    fn citations_citing_paper(&self, paper_id: &str) -> Result<Vec<Citation>>;
 
     // Index management
     fn rebuild_index(&self) -> Result<()>;

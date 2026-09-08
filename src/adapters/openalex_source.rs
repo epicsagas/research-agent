@@ -172,7 +172,8 @@ impl PaperSource for OpenAlexSource {
 }
 
 /// Citation-graph half of the OpenAlex adapter: resolve the `W…` ids a paper
-/// references, then hydrate those ids into `Paper` records.
+/// references, then hydrate those ids into `Paper` records; and the reverse,
+/// list the works citing a paper via the `cites:` filter.
 pub struct ReferencesSource {
     client: reqwest::Client,
 }
@@ -204,6 +205,33 @@ impl ReferencesSource {
             .collect())
     }
 
+    /// Works citing `paper`, hydrated. The `cites:` filter needs a `W…` id, so
+    /// a DOI-only paper is resolved through one extra lookup.
+    // ponytail: first page only (200 works, the OpenAlex per-page max);
+    // cursor-pagination the `meta.next_cursor` loop when full citing sets matter.
+    pub async fn citing_papers(&self, paper: &Paper) -> Result<Vec<Paper>> {
+        let work_id = match &paper.openalex_id {
+            Some(id) => id.clone(),
+            None => {
+                let doi = paper.doi.as_ref().ok_or_else(|| {
+                    ResearchError::Source(
+                        "paper has no openalex_id or DOI; cannot resolve citers".into(),
+                    )
+                })?;
+                let work = self.fetch_work(&format!("doi:{doi}")).await?;
+                openalex_work_id(work.id.as_deref().unwrap_or_default()).ok_or_else(|| {
+                    ResearchError::Source("OpenAlex returned a work without an id".into())
+                })?
+            }
+        };
+        let works = self
+            .fetch_results(&format!(
+                "https://api.openalex.org/works?filter=cites:{work_id}&per-page=200"
+            ))
+            .await?;
+        Ok(works.into_iter().filter_map(work_to_paper).collect())
+    }
+
     /// Hydrate work ids into papers. One batched request per chunk (the
     /// `openalex_id:` filter accepts `|`-joined ids; per-page caps at 200).
     pub async fn hydrate(&self, work_ids: &[String]) -> Result<Vec<Paper>> {
@@ -214,26 +242,32 @@ impl ReferencesSource {
                 chunk.join("|"),
                 chunk.len(),
             );
-            let resp = self
-                .client
-                .get(&url)
-                .header("User-Agent", "research-agent/0.1")
-                .send()
-                .await
-                .map_err(|e| ResearchError::Source(format!("OpenAlex request failed: {e}")))?;
-            let status = resp.status();
-            if !status.is_success() {
-                return Err(ResearchError::Source(format!(
-                    "OpenAlex API returned HTTP {status}"
-                )));
-            }
-            let parsed: OaResponse = resp
-                .json()
-                .await
-                .map_err(|e| ResearchError::Source(format!("OpenAlex parse failed: {e}")))?;
-            papers.extend(parsed.results.unwrap_or_default().into_iter().filter_map(work_to_paper));
+            let works = self.fetch_results(&url).await?;
+            papers.extend(works.into_iter().filter_map(work_to_paper));
         }
         Ok(papers)
+    }
+
+    /// GET a works-list URL and unwrap its `results`.
+    async fn fetch_results(&self, url: &str) -> Result<Vec<OaWork>> {
+        let resp = self
+            .client
+            .get(url)
+            .header("User-Agent", "research-agent/0.1")
+            .send()
+            .await
+            .map_err(|e| ResearchError::Source(format!("OpenAlex request failed: {e}")))?;
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(ResearchError::Source(format!(
+                "OpenAlex API returned HTTP {status}"
+            )));
+        }
+        let parsed: OaResponse = resp
+            .json()
+            .await
+            .map_err(|e| ResearchError::Source(format!("OpenAlex parse failed: {e}")))?;
+        Ok(parsed.results.unwrap_or_default())
     }
 
     async fn fetch_work(&self, key: &str) -> Result<OaWork> {

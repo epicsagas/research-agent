@@ -33,7 +33,7 @@ The same binary also works as a standalone CLI for terminals and scripts.
 |--|---------|----------------|
 | 🤖 | MCP server | 16 tools your agent drives directly over stdio — no API key needed |
 | 🧠 | Agent-native analysis | Gap analysis and reports run inside your agent: tools hand over structured state, the agent reasons, results are persisted |
-| 🔗 | Citation graph | Paper-to-paper reference edges from OpenAlex power "what should I read next from this paper" |
+| 🔗 | Citation graph | Paper-to-paper reference edges from OpenAlex, forward and reverse, power "what should I read next from this paper" |
 | 📚 | Paper indexing | arXiv, Semantic Scholar, OpenAlex, Europe PMC (PubMed), bioRxiv-style preprints, and local PDF support |
 | 🔍 | Hybrid search | FTS5 lexical + local-ONNX semantic hits, RRF-fused — works offline |
 | 📂 | Topic trees | Organize research hierarchically with sub-topics |
