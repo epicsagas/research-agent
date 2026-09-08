@@ -77,6 +77,34 @@ struct OaWork {
     authorships: Vec<OaAuthorship>,
     #[serde(default)]
     abstract_inverted_index: Option<std::collections::HashMap<String, Vec<usize>>>,
+    #[serde(default)]
+    referenced_works: Vec<String>,
+}
+
+/// Shared mapping for both the search and reference endpoints.
+fn work_to_paper(work: OaWork) -> Option<Paper> {
+    let title = work.display_name.filter(|t| !t.is_empty())?;
+    let mut paper = Paper::new(title);
+    paper.year = work.publication_year;
+    paper.doi = work.doi.as_deref().map(normalize_doi);
+    paper.venue = work
+        .primary_location
+        .as_ref()
+        .and_then(|loc| loc.source.as_ref())
+        .and_then(|src| src.display_name.clone());
+    paper.openalex_id = work.id.as_deref().and_then(openalex_work_id);
+    paper.abstract_text = work
+        .abstract_inverted_index
+        .as_ref()
+        .map(reconstruct_abstract)
+        .unwrap_or_default();
+    paper.authors = work
+        .authorships
+        .iter()
+        .filter_map(|a| a.author.as_ref().and_then(|au| au.display_name.clone()))
+        .collect();
+    paper.url = work.id.clone();
+    Some(paper)
 }
 
 #[derive(Deserialize)]
@@ -130,38 +158,108 @@ impl PaperSource for OpenAlexSource {
             .await
             .map_err(|e| ResearchError::Source(format!("OpenAlex parse failed: {e}")))?;
 
-        let mut papers = Vec::new();
-        for work in parsed.results.unwrap_or_default() {
-            let Some(title) = work.display_name.filter(|t| !t.is_empty()) else {
-                continue;
-            };
-            let mut paper = Paper::new(title);
-            paper.year = work.publication_year;
-            paper.doi = work.doi.as_deref().map(normalize_doi);
-            paper.venue = work
-                .primary_location
-                .as_ref()
-                .and_then(|loc| loc.source.as_ref())
-                .and_then(|src| src.display_name.clone());
-            paper.openalex_id = work.id.as_deref().and_then(openalex_work_id);
-            paper.abstract_text = work
-                .abstract_inverted_index
-                .as_ref()
-                .map(reconstruct_abstract)
-                .unwrap_or_default();
-            paper.authors = work
-                .authorships
-                .iter()
-                .filter_map(|a| a.author.as_ref().and_then(|au| au.display_name.clone()))
-                .collect();
-            paper.url = work.id.clone();
-            papers.push(paper);
-        }
-        Ok(papers)
+        Ok(parsed
+            .results
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(work_to_paper)
+            .collect())
     }
 
     fn name(&self) -> &str {
         "openalex"
+    }
+}
+
+/// Citation-graph half of the OpenAlex adapter: resolve the `W…` ids a paper
+/// references, then hydrate those ids into `Paper` records.
+pub struct ReferencesSource {
+    client: reqwest::Client,
+}
+
+impl ReferencesSource {
+    pub fn new() -> Self {
+        Self {
+            client: reqwest::Client::new(),
+        }
+    }
+
+    /// OpenAlex work ids (`W…`) referenced by `paper`. The paper must carry an
+    /// `openalex_id` or a DOI; anything else cannot be resolved.
+    pub async fn reference_ids(&self, paper: &Paper) -> Result<Vec<String>> {
+        let key = match (&paper.openalex_id, &paper.doi) {
+            (Some(id), _) => id.clone(),
+            (None, Some(doi)) => format!("doi:{doi}"),
+            (None, None) => {
+                return Err(ResearchError::Source(
+                    "paper has no openalex_id or DOI; cannot resolve references".into(),
+                ));
+            }
+        };
+        let work = self.fetch_work(&key).await?;
+        Ok(work
+            .referenced_works
+            .iter()
+            .filter_map(|u| openalex_work_id(u))
+            .collect())
+    }
+
+    /// Hydrate work ids into papers. One batched request per chunk (the
+    /// `openalex_id:` filter accepts `|`-joined ids; per-page caps at 200).
+    pub async fn hydrate(&self, work_ids: &[String]) -> Result<Vec<Paper>> {
+        let mut papers = Vec::new();
+        for chunk in work_ids.chunks(50) {
+            let url = format!(
+                "https://api.openalex.org/works?filter=openalex_id:{}&per-page={}",
+                chunk.join("|"),
+                chunk.len(),
+            );
+            let resp = self
+                .client
+                .get(&url)
+                .header("User-Agent", "research-agent/0.1")
+                .send()
+                .await
+                .map_err(|e| ResearchError::Source(format!("OpenAlex request failed: {e}")))?;
+            let status = resp.status();
+            if !status.is_success() {
+                return Err(ResearchError::Source(format!(
+                    "OpenAlex API returned HTTP {status}"
+                )));
+            }
+            let parsed: OaResponse = resp
+                .json()
+                .await
+                .map_err(|e| ResearchError::Source(format!("OpenAlex parse failed: {e}")))?;
+            papers.extend(parsed.results.unwrap_or_default().into_iter().filter_map(work_to_paper));
+        }
+        Ok(papers)
+    }
+
+    async fn fetch_work(&self, key: &str) -> Result<OaWork> {
+        let url = format!("https://api.openalex.org/works/{}", percent_encode(key));
+        let resp = self
+            .client
+            .get(&url)
+            .header("User-Agent", "research-agent/0.1")
+            .send()
+            .await
+            .map_err(|e| ResearchError::Source(format!("OpenAlex request failed: {e}")))?;
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(ResearchError::Source(format!(
+                "OpenAlex API returned HTTP {status}"
+            )));
+        }
+        resp.json()
+            .await
+            .map_err(|e| ResearchError::Source(format!("OpenAlex parse failed: {e}")))
+    }
+}
+
+impl Default for ReferencesSource {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -229,5 +327,42 @@ mod tests {
     #[test]
     fn source_name() {
         assert_eq!(OpenAlexSource::new().name(), "openalex");
+    }
+
+    const REFS_FIXTURE: &str = r#"{
+        "id": "https://openalex.org/W2741809807",
+        "display_name": "Nanometre-scale thermometry in a living cell",
+        "referenced_works": [
+            "https://openalex.org/W1560783210",
+            "https://openalex.org/W1724212071"
+        ]
+    }"#;
+
+    #[test]
+    fn extracts_reference_ids_from_urls() {
+        let work: OaWork = serde_json::from_str(REFS_FIXTURE).unwrap();
+        let ids: Vec<String> = work
+            .referenced_works
+            .iter()
+            .filter_map(|u| openalex_work_id(u))
+            .collect();
+        assert_eq!(ids, vec!["W1560783210", "W1724212071"]);
+    }
+
+    #[test]
+    fn hydrates_referenced_works() {
+        let parsed: OaResponse = serde_json::from_str(
+            r#"{"results": [{"id": "https://openalex.org/W1560783210", "display_name": "Anatomy of green open access"}]}"#,
+        )
+        .unwrap();
+        let papers: Vec<Paper> = parsed
+            .results
+            .unwrap()
+            .into_iter()
+            .filter_map(work_to_paper)
+            .collect();
+        assert_eq!(papers.len(), 1);
+        assert_eq!(papers[0].openalex_id.as_deref(), Some("W1560783210"));
+        assert_eq!(papers[0].title, "Anatomy of green open access");
     }
 }

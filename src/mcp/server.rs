@@ -22,6 +22,7 @@ use super::guard;
 use serde_json::{Value, json};
 
 use crate::adapters::arxiv_source::ArxivSource;
+use crate::adapters::europepmc_source::{EuropePmcSource, PreprintSource};
 use crate::adapters::openalex_source::OpenAlexSource;
 use crate::adapters::pdf_source::PdfSource;
 use crate::adapters::semantic_scholar_source::SemanticScholarSource;
@@ -191,6 +192,22 @@ async fn ingest_remote(store: &SqliteStore, p: &IngestParams) -> ToolOutcome<(Ve
             .map_err(err_result)?;
         papers.extend(fetched);
     }
+    if p.source == "europepmc" || p.source == "all" {
+        let epmc = EuropePmcSource::new();
+        let fetched = IngestPipeline::new(&epmc, store)
+            .run(q, p.limit)
+            .await
+            .map_err(err_result)?;
+        papers.extend(fetched);
+    }
+    if p.source == "preprints" || p.source == "all" {
+        let pre = PreprintSource::new();
+        let fetched = IngestPipeline::new(&pre, store)
+            .run(q, p.limit)
+            .await
+            .map_err(err_result)?;
+        papers.extend(fetched);
+    }
     Ok((papers, 0))
 }
 
@@ -247,7 +264,7 @@ impl ResearchServer {
     }
 
     #[tool(
-        description = "Ingest papers from arXiv, Semantic Scholar, OpenAlex, or local PDFs. source: arxiv|s2|openalex|all|pdf. For arxiv/s2/openalex/all a query is required; for pdf a path (file or dir) is required. Optionally link ingested papers to a topic. Network-heavy for arxiv/s2/openalex (async)."
+        description = "Ingest papers from arXiv, Semantic Scholar, OpenAlex, Europe PMC (PubMed), bioRxiv-style preprints, or local PDFs. source: arxiv|s2|openalex|europepmc|preprints|all|pdf. For arxiv/s2/openalex/europepmc/preprints/all a query is required; for pdf a path (file or dir) is required. Optionally link ingested papers to a topic. Network-heavy for remote sources (async)."
     )]
     pub async fn ingest(&self, Parameters(p): Parameters<IngestParams>) -> CallToolResult {
         let store = match open_store(&self.ctx.db_path) {
@@ -338,6 +355,41 @@ impl ResearchServer {
                 }))
             }
             Ok(None) => ok_value(json!({ "id": p.id, "has_body": false })),
+            Err(e) => err_result(e),
+        }
+    }
+
+    #[tool(
+        description = "Fetch and store the references (citation graph edges) of a paper via OpenAlex, ingesting newly seen referenced papers into the library. Requires the paper to have an OpenAlex id or DOI. Idempotent. Network-heavy (async)."
+    )]
+    pub async fn paper_references(
+        &self,
+        Parameters(p): Parameters<PaperReferencesParams>,
+    ) -> CallToolResult {
+        let store = match open_store(&self.ctx.db_path) {
+            Ok(s) => s,
+            Err(e) => return err_result(e),
+        };
+        let paper = match store.get_paper(&p.id) {
+            Ok(Some(paper)) => paper,
+            Ok(None) => {
+                return err_result(ResearchError::NotFound(format!("paper '{}' not found", p.id)))
+            }
+            Err(e) => return err_result(e),
+        };
+        match crate::application::references::sync_references(&store, &paper).await {
+            Ok((papers, new_edges, new_papers)) => match store.citations_for_paper(&p.id) {
+                Ok(edges) => ok_value(json!({
+                    "id": p.id,
+                    "references": edges.len(),
+                    "new_edges": new_edges,
+                    "new_papers_count": new_papers,
+                    // Resolved reference papers (metadata only); already-known
+                    // entries are included so the agent can see the full list.
+                    "referenced_papers": papers,
+                })),
+                Err(e) => err_result(e),
+            },
             Err(e) => err_result(e),
         }
     }

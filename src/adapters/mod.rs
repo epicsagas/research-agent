@@ -1,5 +1,6 @@
 pub mod arxiv_source;
 pub mod bib_importer;
+pub mod europepmc_source;
 pub mod llm_research_engine;
 pub mod openalex_source;
 pub mod pdf_source;

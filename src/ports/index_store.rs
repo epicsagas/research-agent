@@ -1,3 +1,4 @@
+use crate::domain::citation::Citation;
 use crate::domain::knowledge_gap::KnowledgeGap;
 use crate::domain::paper::{Paper, PaperStatus, Rating, ReadingStatus};
 use crate::domain::research_report::ResearchReport;
@@ -12,6 +13,9 @@ pub trait IndexStore: Send + Sync {
     /// Look up a paper by its DOI (exact match). Used by the import pipeline
     /// to skip records that are already in the library.
     fn find_paper_by_doi(&self, doi: &str) -> Result<Option<Paper>>;
+    /// Look up a paper by its OpenAlex work id (`W…`). Used by the reference
+    /// graph to dedupe hydrated referenced papers on re-runs.
+    fn find_paper_by_openalex_id(&self, openalex_id: &str) -> Result<Option<Paper>>;
     /// Store (or replace) the extracted full body text of a paper. Kept out of
     /// the `Paper` domain type so MCP/tool responses never carry megabytes of
     /// body text.
@@ -51,6 +55,13 @@ pub trait IndexStore: Send + Sync {
     // Reports
     fn insert_report(&self, report: &ResearchReport) -> Result<()>;
     fn list_reports(&self, limit: Option<usize>) -> Result<Vec<ResearchReport>>;
+
+    // Citations
+    /// Insert citation edges, skipping pairs already stored. Returns how many
+    /// were newly inserted.
+    fn insert_citations(&self, citations: &[Citation]) -> Result<usize>;
+    /// Reference edges originating from `paper_id`, insertion order.
+    fn citations_for_paper(&self, paper_id: &str) -> Result<Vec<Citation>>;
 
     // Index management
     fn rebuild_index(&self) -> Result<()>;

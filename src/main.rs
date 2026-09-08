@@ -39,11 +39,11 @@ enum Commands {
         /// Search query (not required for --source pdf)
         query: Option<String>,
 
-        /// Source: arxiv, s2, openalex, all, or pdf
+        /// Source: arxiv, s2, openalex, europepmc, preprints, all, or pdf
         #[arg(long, default_value = "all")]
         source: String,
 
-        /// Maximum papers to fetch (arxiv/s2/openalex)
+        /// Maximum papers to fetch (arxiv/s2/openalex/europepmc/preprints)
         #[arg(long, default_value_t = 10)]
         limit: usize,
 
@@ -71,6 +71,12 @@ enum Commands {
         /// Maximum results
         #[arg(long, default_value_t = 20)]
         limit: usize,
+    },
+
+    /// Fetch and store the references of a paper (citation graph)
+    References {
+        /// Paper ID
+        id: String,
     },
 
     /// Analyze knowledge gaps
@@ -172,6 +178,7 @@ async fn main() -> Result<()> {
         } => cmd_ingest(db, query, source, limit, path, topic).await?,
         Commands::Index { rebuild } => cmd_index(db, rebuild)?,
         Commands::Query { query, limit } => cmd_query(db, query, limit)?,
+        Commands::References { id } => cmd_references(db, id).await?,
         Commands::Gaps { topic } => cmd_gaps(db, topic).await?,
         Commands::Report { title, topic } => cmd_report(db, title, topic).await?,
         Commands::Topics { action } => cmd_topics(db, action)?,
@@ -269,6 +276,22 @@ async fn cmd_ingest(
             println!("Ingested {} papers from OpenAlex", papers.len());
             all_papers.extend(papers);
         }
+
+        if source == "europepmc" || source == "all" {
+            let epmc = research_agent::adapters::europepmc_source::EuropePmcSource::new();
+            let pipeline = IngestPipeline::new(&epmc, &store);
+            let papers = pipeline.run(&q, limit).await?;
+            println!("Ingested {} papers from Europe PMC", papers.len());
+            all_papers.extend(papers);
+        }
+
+        if source == "preprints" || source == "all" {
+            let pre = research_agent::adapters::europepmc_source::PreprintSource::new();
+            let pipeline = IngestPipeline::new(&pre, &store);
+            let papers = pipeline.run(&q, limit).await?;
+            println!("Ingested {} papers from preprint servers", papers.len());
+            all_papers.extend(papers);
+        }
     }
 
     if let Some(topic_id) = &topic {
@@ -362,6 +385,45 @@ fn cmd_query(db: PathBuf, query: String, limit: usize) -> Result<()> {
             println!();
         }
         println!("{} paper(s) found.", results.len());
+    }
+    Ok(())
+}
+
+async fn cmd_references(db: PathBuf, id: String) -> Result<()> {
+    let store = open_store(&db)?;
+    let paper = store
+        .get_paper(&id)?
+        .ok_or_else(|| anyhow::anyhow!("paper '{id}' not found"))?;
+
+    // Fresh fetch; falls back to stored edges when the paper has no OpenAlex
+    // identity or the network call fails, so "what should I read next" still
+    // answers from earlier syncs.
+    let (_papers, new_edges, new_papers) =
+        match research_agent::application::references::sync_references(&store, &paper).await {
+            Ok((papers, new_edges, new_papers)) => (papers, new_edges, new_papers),
+            Err(e) => {
+                eprintln!("Warning: reference fetch failed ({e}); showing stored edges.");
+                (Vec::new(), 0, 0)
+            }
+        };
+
+    let edges = store.citations_for_paper(&id)?;
+    if edges.is_empty() {
+        println!("No references known for '{id}'.");
+        return Ok(());
+    }
+    println!(
+        "{} reference(s) ({} new), ingested {} new paper(s):",
+        edges.len(),
+        new_edges,
+        new_papers
+    );
+    for edge in &edges {
+        let title = match store.get_paper(&edge.cited_paper_id)? {
+            Some(p) => p.title,
+            None => "(paper not in library)".into(),
+        };
+        println!("- [{}] {}", edge.cited_paper_id, title);
     }
     Ok(())
 }
