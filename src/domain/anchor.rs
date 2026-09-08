@@ -52,11 +52,14 @@ pub fn resolve(body: &str, offset: usize) -> Anchor {
 /// Nearest preceding `## ` heading. Headings are written on their own line by
 /// the PDF ingest, so the match must start a line.
 fn last_section(before: &str) -> Option<String> {
-    let idx = if before.starts_with("## ") {
-        Some(0)
-    } else {
-        before.rfind("\n## ").map(|i| i + 1)
-    }?;
+    // Nearest preceding heading, so the later one wins. Checking
+    // `starts_with` first would pin every hit to the document's opening
+    // heading no matter how far past it the match sits.
+    let idx = match before.rfind("\n## ") {
+        Some(i) => i + 1,
+        None if before.starts_with("## ") => 0,
+        None => return None,
+    };
     let rest = &before[idx + 3..];
     let line = rest.split('\n').next().unwrap_or(rest).trim();
     if line.is_empty() {
@@ -66,11 +69,26 @@ fn last_section(before: &str) -> Option<String> {
 }
 
 /// Nearest preceding page marker, parsed from `<!-- page N -->`.
+///
+/// Markers are written at the start of a line, and only those count: a paper
+/// whose own text quotes the marker syntax (papers about markup do) would
+/// otherwise report the quoted number as its page. `last_section` already
+/// requires a line start; this is the same rule for the other marker.
 fn last_page(before: &str) -> Option<usize> {
-    let idx = before.rfind(PAGE_MARKER_PREFIX)?;
-    let rest = &before[idx + PAGE_MARKER_PREFIX.len()..];
-    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
-    digits.parse().ok()
+    let mut search_end = before.len();
+    loop {
+        let idx = before[..search_end].rfind(PAGE_MARKER_PREFIX)?;
+        if idx == 0 || before.as_bytes()[idx - 1] == b'\n' {
+            let rest = &before[idx + PAGE_MARKER_PREFIX.len()..];
+            let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+            // A marker cut in half by the 500k body cap has no digits; keep
+            // looking rather than reporting no page at all.
+            if let Ok(page) = digits.parse() {
+                return Some(page);
+            }
+        }
+        search_end = idx;
+    }
 }
 
 #[cfg(test)]
@@ -147,5 +165,33 @@ mod tests {
         let anchor = resolve(body, offset);
         assert_eq!(anchor.page, Some(3));
         assert_eq!(anchor.section.as_deref(), Some("Résumé"));
+    }
+
+    /// A body that quotes the marker syntax must not be anchored by the quote.
+    #[test]
+    fn literal_marker_inside_text_is_not_a_page_boundary() {
+        let body = "<!-- page 1 -->\n## Methods\nWe write markers like <!-- page 3 --> inline.\nreal text\n";
+        let offset = body.find("real text").unwrap();
+        assert_eq!(resolve(body, offset).page, Some(1));
+    }
+
+    /// The 500k body cap can slice a marker in half; a digitless remnant must
+    /// fall through to the previous complete marker, not erase the page.
+    #[test]
+    fn truncated_trailing_marker_falls_through() {
+        let body = "<!-- page 1 -->\ntext\n<!-- page ";
+        assert_eq!(resolve(body, body.len()).page, Some(1));
+    }
+
+    /// The nearest preceding heading wins, not the document's first one.
+    #[test]
+    fn later_heading_beats_the_opening_heading() {
+        let body = "## Intro\nalpha\n## Results\nbeta here\n";
+        let offset = body.find("beta here").unwrap();
+        assert_eq!(
+            resolve(body, offset).section.as_deref(),
+            Some("Results"),
+            "a body that opens with a heading must not pin every hit to it"
+        );
     }
 }

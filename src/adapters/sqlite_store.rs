@@ -30,13 +30,44 @@ fn fts_phrase_query(raw: &str) -> String {
         .join(" ")
 }
 
-/// The first bracketed run in an FTS5 `snippet()` result, i.e. the text that
-/// actually matched. `None` when the snippet carries no bracket pair.
-fn matched_term(snippet: &str) -> Option<&str> {
-    let start = snippet.find('[')? + 1;
-    let end = snippet[start..].find(']')? + start;
-    let term = &snippet[start..end];
-    (!term.is_empty()).then_some(term)
+/// Where in `body` an FTS5 `snippet()` result came from.
+///
+/// Anchoring on the matched term alone is wrong twice over: the term may occur
+/// many times (`find` would take the first, not the one FTS chose), and the
+/// trigram tokenizer matches inside words, so a hit on "ion" can land in the
+/// middle of the heading "Introduction" and report a truncated section.
+///
+/// Rebuilding the snippet's own text and locating *that* pins the real
+/// position: it is a contiguous run of the body, long enough to be unique in
+/// practice. Ellipses mark where snippet() clipped the window, so the
+/// unclipped middle is what gets matched.
+fn locate_snippet(snippet: &str, body: &str) -> Option<usize> {
+    let core = snippet.trim_matches('…');
+    let plain: String = core.chars().filter(|c| *c != '[' && *c != ']').collect();
+    let plain = plain.trim();
+    if plain.is_empty() {
+        return None;
+    }
+    // Offset the snippet start by where the first match sits inside it, so the
+    // anchor is the matched text itself rather than the snippet's leading edge
+    // (which can begin mid-heading and truncate the section name).
+    let lead = core
+        .find('[')
+        .map(|b| core[..b].chars().filter(|c| *c != '[' && *c != ']').count());
+    let in_snippet = lead
+        .map(|chars| plain.chars().take(chars).map(char::len_utf8).sum())
+        .unwrap_or(0);
+    if let Some(pos) = body.find(plain) {
+        return Some(pos + in_snippet);
+    }
+    // snippet() reproduces the body's casing, so an exact hit is the norm.
+    // Fall back case-insensitively rather than silently anchoring to offset 0,
+    // which would report the document's first section for a match anywhere.
+    let lower_body = body.to_lowercase();
+    let pos = lower_body.find(&plain.to_lowercase())? + in_snippet;
+    // Byte offsets from the lowercased copy are only valid if lowercasing did
+    // not change the length; give up rather than report a wrong anchor.
+    (lower_body.len() == body.len()).then_some(pos)
 }
 
 impl SqliteStore {
@@ -162,8 +193,24 @@ impl IndexStore for SqliteStore {
         let conn = self.conn.lock().map_err(|e| {
             ResearchError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
         })?;
-        let mut stmt = conn.prepare("SELECT * FROM papers WHERE doi = ?1 LIMIT 1")?;
-        let mut rows = stmt.query(params![doi])?;
+        // Compare on the normalized form so a DOI stored raw by an earlier
+        // ingest (Europe PMC and Semantic Scholar store what upstream sends)
+        // still matches a normalized one arriving now. Normalizing only the
+        // incoming side would let 10.1038/NATURE12373 and 10.1038/nature12373
+        // coexist as separate papers.
+        let needle = crate::adapters::bib_importer::normalize_doi(doi);
+        let Some(needle) = needle else {
+            return Ok(None);
+        };
+        let mut stmt = conn.prepare(
+            "SELECT * FROM papers WHERE lower(
+                 replace(replace(replace(trim(doi),
+                     'https://doi.org/', ''),
+                     'http://dx.doi.org/', ''),
+                     'https://dx.doi.org/', '')
+             ) = ?1 LIMIT 1",
+        )?;
+        let mut rows = stmt.query(params![needle])?;
         match rows.next()? {
             Some(row) => Ok(Some(Self::paper_from_row(row)?)),
             None => Ok(None),
@@ -336,8 +383,7 @@ impl IndexStore for SqliteStore {
              JOIN paper_bodies pb ON pb.paper_id = p.id
              JOIN bodies_fts fts ON fts.rowid = pb.rowid
              WHERE bodies_fts MATCH ?1
-               AND (?2 IS NULL OR p.id = ?2)
-             LIMIT ?3",
+             LIMIT ?2",
         )?;
         let rows = stmt.query_map(params![fts_query, limit_i64], Self::paper_from_row)?;
         for p in rows {
@@ -375,7 +421,8 @@ impl IndexStore for SqliteStore {
              JOIN paper_bodies pb ON pb.paper_id = p.id
              JOIN bodies_fts fts ON fts.rowid = pb.rowid
              WHERE bodies_fts MATCH ?1
-             LIMIT ?2",
+               AND (?2 IS NULL OR p.id = ?2)
+             LIMIT ?3",
         )?;
         let rows = stmt.query_map(params![fts_query, paper_id, limit as i64], |row| {
             Ok((
@@ -392,14 +439,14 @@ impl IndexStore for SqliteStore {
             // Anchoring on surrounding context instead would land on the
             // leading edge of the window and can sit *before* the very heading
             // the match falls under.
-            let offset = matched_term(&snippet)
-                .and_then(|term| body.find(term))
-                .unwrap_or(0);
+            let anchor = locate_snippet(&snippet, &body)
+                .map(|off| crate::domain::anchor::resolve(&body, off))
+                .unwrap_or_default();
             out.push(BodyEvidence {
                 paper_id,
                 title,
                 snippet,
-                anchor: crate::domain::anchor::resolve(&body, offset),
+                anchor,
             });
         }
         Ok(out)
@@ -1367,14 +1414,22 @@ mod tests {
         );
     }
 
+    /// The returned offset is the matched text, not the snippet's leading
+    /// edge: a snippet that opens mid-heading would otherwise anchor inside
+    /// the heading and report a truncated section name.
     #[test]
-    fn matched_term_extracts_bracketed_run() {
+    fn locate_snippet_points_at_the_match_not_the_window() {
+        let body = "## Intro\nalpha text\n## Results\nbeta text here\n";
+        let at = locate_snippet("…## Results\nbeta [text] here…", body).unwrap();
+        assert_eq!(&body[at..at + 4], "text");
+        // That offset sits after the heading, so the section resolves whole.
         assert_eq!(
-            matched_term("…## Results\nthe [readout] was stable"),
-            Some("readout")
+            crate::domain::anchor::resolve(body, at).section.as_deref(),
+            Some("Results")
         );
-        assert_eq!(matched_term("no brackets here"), None);
-        assert_eq!(matched_term("[]"), None);
+
+        assert_eq!(locate_snippet("…", body), None);
+        assert_eq!(locate_snippet("text absent from body", body), None);
     }
 
     /// Scoping to one paper must happen in the query. Filtering a whole-library
@@ -1408,5 +1463,53 @@ mod tests {
         // Unscoped still searches everything.
         let all = store.search_body_evidence("keyword", None, 20).unwrap();
         assert_eq!(all.len(), 11);
+    }
+
+    /// The exact scenario an audit reproduced: a term that also occurs inside
+    /// an earlier heading. Anchoring on the term's first occurrence reported
+    /// the wrong page and a section name truncated mid-word ("Introduct").
+    #[test]
+    fn body_evidence_anchors_the_matched_occurrence_not_the_first() {
+        let store = test_store();
+        let paper = Paper::new("ion beam".into());
+        store.insert_paper(&paper).unwrap();
+        store
+            .set_paper_body(
+                &paper.id,
+                "<!-- page 1 -->\n## Introduction\nbackground material\n<!-- page 3 -->\n## Results\nthe ion beam produced clean output\n",
+            )
+            .unwrap();
+
+        let hits = store.search_body_evidence("ion beam", None, 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        // "ion" also lives inside "Introduction" on page 1; the trigram
+        // tokenizer matches inside words, so this is a real collision.
+        assert_eq!(hits[0].anchor.section.as_deref(), Some("Results"));
+        assert_eq!(hits[0].anchor.page, Some(3));
+    }
+
+    /// DOI matching is normalization-insensitive on both sides: papers stored
+    /// by an earlier ingest keep whatever form upstream sent, and must still
+    /// dedupe against a normalized DOI arriving from an import.
+    #[test]
+    fn find_paper_by_doi_matches_across_stored_forms() {
+        let store = test_store();
+        let mut raw = Paper::new("stored raw".into());
+        raw.doi = Some("https://doi.org/10.1038/NATURE12373".into());
+        store.insert_paper(&raw).unwrap();
+
+        for probe in [
+            "10.1038/nature12373",
+            "10.1038/NATURE12373",
+            "https://doi.org/10.1038/nature12373",
+            "  doi:10.1038/Nature12373 ",
+        ] {
+            assert_eq!(
+                store.find_paper_by_doi(probe).unwrap().map(|p| p.id),
+                Some(raw.id.clone()),
+                "probe {probe:?} should match the stored paper"
+            );
+        }
+        assert!(store.find_paper_by_doi("10.1/other").unwrap().is_none());
     }
 }

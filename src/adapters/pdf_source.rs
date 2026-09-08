@@ -95,6 +95,20 @@ impl PdfSource {
                 path.display()
             ))
         })?;
+        // The per-page extractor stops at the first page it cannot render and
+        // reports that as end-of-document, so a mid-document failure silently
+        // truncates the body. Compare against the document's own page count
+        // and say so rather than storing a short body as if it were complete.
+        if let Ok(doc) = pdf_extract::Document::load_mem(&bytes) {
+            let expected = doc.get_pages().len();
+            if expected > pages.len() {
+                eprintln!(
+                    "Warning: extracted {} of {expected} page(s) from {}; the stored body is truncated.",
+                    pages.len(),
+                    path.display()
+                );
+            }
+        }
         let text = join_pages(&pages);
 
         let title = path
