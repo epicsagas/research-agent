@@ -360,7 +360,7 @@ impl ResearchServer {
     }
 
     #[tool(
-        description = "Fetch and store citation-graph edges for a paper via OpenAlex, ingesting newly seen related papers into the library. direction \"references\" (default) lists the works the paper cites; \"cited_by\" lists the works citing it. Requires the paper to have an OpenAlex id or DOI. Idempotent. Network-heavy (async)."
+        description = "Fetch and store citation-graph edges for a paper via OpenAlex, ingesting newly seen related papers into the library. direction \"references\" (default) lists the works the paper cites; \"cited_by\" lists the works citing it. Set intents=true to additionally label edges with Semantic Scholar citation intents (background/methodology/result, influential); S2 classifies only a fraction of edges, so partial labeling is normal. Requires the paper to have an OpenAlex id or DOI. Idempotent. Network-heavy (async)."
     )]
     pub async fn paper_references(
         &self,
@@ -396,6 +396,17 @@ impl ResearchServer {
         };
         match synced {
             Ok((papers, new_edges, new_papers)) => {
+                // Opt-in second pass: labels only edges the graph already
+                // holds, and spends its own rate-limited S2 request. A
+                // failure here leaves edges unlabeled rather than failing the
+                // whole call.
+                let intent_counts = if p.intents.unwrap_or(false) {
+                    crate::application::references::sync_citation_intents(&store, &paper, cited_by)
+                        .await
+                        .ok()
+                } else {
+                    None
+                };
                 let edges = if cited_by {
                     store.citations_citing_paper(&p.id)
                 } else {
@@ -408,6 +419,16 @@ impl ResearchServer {
                         "edges": edges.len(),
                         "new_edges": new_edges,
                         "new_papers_count": new_papers,
+                        // Present only when intents were requested; null when
+                        // the S2 pass was skipped or failed.
+                        "intents_labeled": intent_counts.map(|(labeled, _)| labeled),
+                        "intents_unlabeled": intent_counts.map(|(_, unlabeled)| unlabeled),
+                        // Per-edge labels, empty string when unclassified.
+                        "edge_contexts": edges.iter().map(|e| json!({
+                            "citing": e.citing_paper_id,
+                            "cited": e.cited_paper_id,
+                            "context": e.context,
+                        })).collect::<Vec<_>>(),
                         // Resolved related papers (metadata only); already-known
                         // entries are included so the agent can see the full list.
                         "related_papers": papers,

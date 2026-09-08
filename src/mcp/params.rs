@@ -51,6 +51,10 @@ pub struct PaperReferencesParams {
     /// Direction: "references" (default, works the paper cites) or
     /// "cited_by" (works citing the paper).
     pub direction: Option<String>,
+    /// Also label edges with Semantic Scholar citation intents
+    /// (background/methodology/result, influential). Costs one extra
+    /// rate-limited request; defaults to false.
+    pub intents: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

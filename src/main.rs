@@ -80,6 +80,10 @@ enum Commands {
         /// List the works citing this paper instead of its references
         #[arg(long)]
         cited_by: bool,
+        /// Also label edges with Semantic Scholar citation intents
+        /// (background/methodology/result, influential)
+        #[arg(long)]
+        intents: bool,
     },
 
     /// Analyze knowledge gaps
@@ -181,7 +185,11 @@ async fn main() -> Result<()> {
         } => cmd_ingest(db, query, source, limit, path, topic).await?,
         Commands::Index { rebuild } => cmd_index(db, rebuild)?,
         Commands::Query { query, limit } => cmd_query(db, query, limit)?,
-        Commands::References { id, cited_by } => cmd_references(db, id, cited_by).await?,
+        Commands::References {
+            id,
+            cited_by,
+            intents,
+        } => cmd_references(db, id, cited_by, intents).await?,
         Commands::Gaps { topic } => cmd_gaps(db, topic).await?,
         Commands::Report { title, topic } => cmd_report(db, title, topic).await?,
         Commands::Topics { action } => cmd_topics(db, action)?,
@@ -392,7 +400,7 @@ fn cmd_query(db: PathBuf, query: String, limit: usize) -> Result<()> {
     Ok(())
 }
 
-async fn cmd_references(db: PathBuf, id: String, cited_by: bool) -> Result<()> {
+async fn cmd_references(db: PathBuf, id: String, cited_by: bool, intents: bool) -> Result<()> {
     let store = open_store(&db)?;
     let paper = store
         .get_paper(&id)?
@@ -412,6 +420,21 @@ async fn cmd_references(db: PathBuf, id: String, cited_by: bool) -> Result<()> {
             (Vec::new(), 0, 0)
         }
     };
+
+    // Opt-in second pass: S2 labels only edges the graph already holds, and
+    // costs its own rate-limited request, so it stays behind a flag.
+    if intents {
+        match research_agent::application::references::sync_citation_intents(
+            &store, &paper, cited_by,
+        )
+        .await
+        {
+            Ok((labeled, unlabeled)) => {
+                println!("Intents: {labeled} edge(s) labeled, {unlabeled} without a label.")
+            }
+            Err(e) => eprintln!("Warning: intent fetch failed ({e}); edges left unlabeled."),
+        }
+    }
 
     let label = if cited_by {
         "citing work(s)"
@@ -443,7 +466,11 @@ async fn cmd_references(db: PathBuf, id: String, cited_by: bool) -> Result<()> {
             .get_paper(other_id)?
             .map(|p| p.title)
             .unwrap_or_else(|| "(paper not in library)".into());
-        println!("- [{other_id}] {title}");
+        if edge.context.is_empty() {
+            println!("- [{other_id}] {title}");
+        } else {
+            println!("- [{other_id}] {title} ({})", edge.context);
+        }
     }
     Ok(())
 }

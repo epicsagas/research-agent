@@ -33,7 +33,7 @@ The same binary also works as a standalone CLI for terminals and scripts.
 |--|---------|----------------|
 | 🤖 | MCP server | 16 tools your agent drives directly over stdio — no API key needed |
 | 🧠 | Agent-native analysis | Gap analysis and reports run inside your agent: tools hand over structured state, the agent reasons, results are persisted |
-| 🔗 | Citation graph | Paper-to-paper reference edges from OpenAlex, forward and reverse, power "what should I read next from this paper" |
+| 🔗 | Citation graph | Paper-to-paper reference edges from OpenAlex, forward and reverse, optionally labeled with Semantic Scholar citation intents |
 | 📚 | Paper indexing | arXiv, Semantic Scholar, OpenAlex, Europe PMC (PubMed), bioRxiv-style preprints, and local PDF support |
 | 🔍 | Hybrid search | FTS5 lexical + local-ONNX semantic hits, RRF-fused — works offline |
 | 📂 | Topic trees | Organize research hierarchically with sub-topics |
@@ -164,6 +164,7 @@ research --version
 | `research import <file\|dir>` | Import BibTeX/BibLaTeX or CSL-JSON files (e.g. a Zotero export) |
 | `research index [--rebuild]` | Build or rebuild search index (FTS + vector index) |
 | `research query <q>` | Search papers — hybrid lexical+semantic when embeddings are available |
+| `research references <id> [--cited-by] [--intents]` | Fetch citation-graph edges from OpenAlex; `--cited-by` reverses the direction, `--intents` labels edges with Semantic Scholar citation intents |
 | `research gaps [--topic <id>]` | Analyze knowledge gaps (CLI: uses `[llm]` if configured) |
 | `research report --topic <id>` | Generate research report (CLI: uses `[llm]` if configured) |
 | `research topics list` | List all topics |

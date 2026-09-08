@@ -686,6 +686,25 @@ impl IndexStore for SqliteStore {
         Ok(citations)
     }
 
+    fn set_citation_contexts(&self, citations: &[Citation]) -> Result<usize> {
+        let mut conn = self.conn.lock().map_err(|e| {
+            ResearchError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let tx = conn.transaction()?;
+        let mut updated = 0usize;
+        for c in citations {
+            // Scoped to existing edges: labeling never invents an edge the
+            // graph sync did not establish.
+            updated += tx.execute(
+                "UPDATE citations SET context = ?3
+                 WHERE citing_paper_id = ?1 AND cited_paper_id = ?2",
+                params![c.citing_paper_id, c.cited_paper_id, c.context],
+            )?;
+        }
+        tx.commit()?;
+        Ok(updated)
+    }
+
     fn rebuild_index(&self) -> Result<()> {
         let conn = self.conn.lock().map_err(|e| {
             ResearchError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))

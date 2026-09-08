@@ -1,4 +1,5 @@
 use crate::adapters::openalex_source::ReferencesSource;
+use crate::adapters::semantic_scholar_source::SemanticScholarSource;
 use crate::domain::citation::Citation;
 use crate::domain::paper::Paper;
 use crate::error::Result;
@@ -35,6 +36,70 @@ pub async fn sync_cited_by(
     let (citations, new_papers) = link_related(store, &paper.id, &citers, true)?;
     let new_edges = store.insert_citations(&citations)?;
     Ok((citers, new_edges, new_papers))
+}
+
+/// Label already-stored citation edges of `paper` with Semantic Scholar's
+/// per-edge intents (`background`, `methodology`, `result`) and its
+/// `isInfluential` flag, written to `citations.context`. `reverse` picks the
+/// direction: forward labels the works `paper` cites, reverse labels the
+/// works citing it.
+///
+/// Only edges already in the graph are touched, so run this after
+/// [`sync_references`] / [`sync_cited_by`]. Returns `(labeled, unlabeled)`
+/// over the stored edges in that direction: how many got a non-empty label,
+/// and how many were left without one (S2 classified nothing, or the other
+/// paper could not be matched by DOI). S2 classifies only a fraction of
+/// edges upstream, so a partial result is the normal outcome, not a failure.
+pub async fn sync_citation_intents(
+    store: &dyn IndexStore,
+    paper: &Paper,
+    reverse: bool,
+) -> Result<(usize, usize)> {
+    let source = SemanticScholarSource::new();
+    let direction = if reverse { "citations" } else { "references" };
+    let intents = source.citation_intents(paper, direction).await?;
+
+    let stored = if reverse {
+        store.citations_citing_paper(&paper.id)?
+    } else {
+        store.citations_for_paper(&paper.id)?
+    };
+
+    let mut labeled = Vec::new();
+    for intent in &intents {
+        let label = intent.label();
+        if label.is_empty() {
+            continue;
+        }
+        // S2 identifies the other paper by DOI or its own id; the graph keys
+        // edges by local paper id, so resolve through the library. An edge S2
+        // knows about but the graph never stored is skipped.
+        let other = match &intent.doi {
+            Some(doi) => store.find_paper_by_doi(doi)?,
+            None => None,
+        };
+        let Some(other) = other else { continue };
+        let pair_exists = stored.iter().any(|e| {
+            if reverse {
+                e.citing_paper_id == other.id
+            } else {
+                e.cited_paper_id == other.id
+            }
+        });
+        if !pair_exists {
+            continue;
+        }
+        let mut citation = if reverse {
+            Citation::new(other.id, paper.id.clone())
+        } else {
+            Citation::new(paper.id.clone(), other.id)
+        };
+        citation.context = label;
+        labeled.push(citation);
+    }
+
+    let updated = store.set_citation_contexts(&labeled)?;
+    Ok((updated, stored.len().saturating_sub(updated)))
 }
 
 /// Resolve `related` papers against the library (OpenAlex id, then DOI),
@@ -136,6 +201,55 @@ mod tests {
         assert_eq!(citations.len(), 1);
         assert_eq!(citations[0].citing_paper_id, backward.id);
         assert_eq!(citations[0].cited_paper_id, paper.id);
+    }
+
+    /// Intents only relabel edges the graph already stores, and only when S2
+    /// gave a non-empty label. Exercised through the store, without network.
+    #[test]
+    fn set_citation_contexts_scoped_to_existing_edges() {
+        let store = SqliteStore::open_in_memory().unwrap();
+        let anchor = Paper::new("anchor".into());
+        let cited = Paper::new("cited".into());
+        store.insert_paper(&anchor).unwrap();
+        store.insert_paper(&cited).unwrap();
+        store
+            .insert_citations(&[Citation::new(anchor.id.clone(), cited.id.clone())])
+            .unwrap();
+
+        let mut labeled = Citation::new(anchor.id.clone(), cited.id.clone());
+        labeled.context = "methodology+influential".into();
+        // A pair with no stored edge must not create one.
+        let mut orphan = Citation::new(anchor.id.clone(), "ghost".into());
+        orphan.context = "background".into();
+
+        let updated = store.set_citation_contexts(&[labeled, orphan]).unwrap();
+        assert_eq!(updated, 1);
+        let edges = store.citations_for_paper(&anchor.id).unwrap();
+        assert_eq!(edges.len(), 1, "orphan pair did not insert an edge");
+        assert_eq!(edges[0].context, "methodology+influential");
+    }
+
+    /// Live round-trip for intent labeling: sync the graph first, then label.
+    /// Ignored by default (network + S2 rate limits).
+    #[tokio::test]
+    #[ignore]
+    async fn live_sync_citation_intents() {
+        let store = SqliteStore::open_in_memory().unwrap();
+        let mut paper = Paper::new("Nanometre-scale thermometry in a living cell".into());
+        paper.openalex_id = Some("W2741809807".into());
+        paper.doi = Some("10.1038/nature12373".into());
+        store.insert_paper(&paper).unwrap();
+
+        sync_references(&store, &paper).await.unwrap();
+        let (labeled, unlabeled) = sync_citation_intents(&store, &paper, false).await.unwrap();
+        // S2 classifies only a fraction of edges, so assert the invariant
+        // (counts partition the stored edges) rather than a coverage number.
+        let edges = store.citations_for_paper(&paper.id).unwrap();
+        assert_eq!(labeled + unlabeled, edges.len());
+        assert_eq!(
+            edges.iter().filter(|e| !e.context.is_empty()).count(),
+            labeled
+        );
     }
 
     /// Live round-trip against the real OpenAlex API. Ignored by default: it

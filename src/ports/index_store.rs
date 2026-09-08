@@ -65,6 +65,9 @@ pub trait IndexStore: Send + Sync {
     /// Citation edges pointing at `paper_id` (works citing it), insertion
     /// order.
     fn citations_citing_paper(&self, paper_id: &str) -> Result<Vec<Citation>>;
+    /// Set the `context` label on existing citation edges. Pairs with no
+    /// stored edge are ignored. Returns how many rows changed.
+    fn set_citation_contexts(&self, citations: &[Citation]) -> Result<usize>;
 
     // Index management
     fn rebuild_index(&self) -> Result<()>;
