@@ -72,8 +72,14 @@ pub trait IndexStore: Send + Sync {
 
     /// Body-text matches for `query`, each carrying the matching snippet and
     /// where in the document it sits. Papers whose body is not stored (no PDF
-    /// ingest) cannot match.
-    fn search_body_evidence(&self, query: &str, limit: usize) -> Result<Vec<BodyEvidence>>;
+    /// ingest) cannot match. `paper_id` scopes the search to one paper; without
+    /// it the whole library is searched.
+    fn search_body_evidence(
+        &self,
+        query: &str,
+        paper_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<BodyEvidence>>;
 
     // Index management
     fn rebuild_index(&self) -> Result<()>;

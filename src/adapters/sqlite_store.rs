@@ -336,7 +336,8 @@ impl IndexStore for SqliteStore {
              JOIN paper_bodies pb ON pb.paper_id = p.id
              JOIN bodies_fts fts ON fts.rowid = pb.rowid
              WHERE bodies_fts MATCH ?1
-             LIMIT ?2",
+               AND (?2 IS NULL OR p.id = ?2)
+             LIMIT ?3",
         )?;
         let rows = stmt.query_map(params![fts_query, limit_i64], Self::paper_from_row)?;
         for p in rows {
@@ -349,7 +350,12 @@ impl IndexStore for SqliteStore {
         Ok(papers)
     }
 
-    fn search_body_evidence(&self, query: &str, limit: usize) -> Result<Vec<BodyEvidence>> {
+    fn search_body_evidence(
+        &self,
+        query: &str,
+        paper_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<BodyEvidence>> {
         let conn = self.conn.lock().map_err(|e| {
             ResearchError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
         })?;
@@ -359,6 +365,9 @@ impl IndexStore for SqliteStore {
         }
         // snippet() gives the matching window with terms bracketed; the body
         // itself comes back so the match can be located for anchoring.
+        // Scoping happens in SQL, not after the fact: filtering a whole-library
+        // result set in the caller lets other papers' hits crowd out the
+        // requested paper's before it is ever reached.
         let mut stmt = conn.prepare(
             "SELECT p.id, p.title, pb.body,
                     snippet(bodies_fts, 0, '[', ']', '…', 32) AS snip
@@ -368,7 +377,7 @@ impl IndexStore for SqliteStore {
              WHERE bodies_fts MATCH ?1
              LIMIT ?2",
         )?;
-        let rows = stmt.query_map(params![fts_query, limit as i64], |row| {
+        let rows = stmt.query_map(params![fts_query, paper_id, limit as i64], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
@@ -1323,14 +1332,14 @@ mod tests {
         let body = "<!-- page 1 -->\nintro\n## Methods\nwe used nanodiamond probes\n<!-- page 2 -->\n## Results\nthe readout was stable\n";
         store.set_paper_body(&paper.id, body).unwrap();
 
-        let hits = store.search_body_evidence("nanodiamond", 10).unwrap();
+        let hits = store.search_body_evidence("nanodiamond", None, 10).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].paper_id, paper.id);
         assert!(hits[0].snippet.contains("nanodiamond"));
         assert_eq!(hits[0].anchor.section.as_deref(), Some("Methods"));
         assert_eq!(hits[0].anchor.page, Some(1));
 
-        let hits = store.search_body_evidence("readout", 10).unwrap();
+        let hits = store.search_body_evidence("readout", None, 10).unwrap();
         assert_eq!(hits[0].anchor.section.as_deref(), Some("Results"));
         assert_eq!(hits[0].anchor.page, Some(2));
     }
@@ -1344,8 +1353,18 @@ mod tests {
             .set_paper_body(&paper.id, "## Intro\nsome text")
             .unwrap();
 
-        assert!(store.search_body_evidence("absent", 10).unwrap().is_empty());
-        assert!(store.search_body_evidence("   ", 10).unwrap().is_empty());
+        assert!(
+            store
+                .search_body_evidence("absent", None, 10)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            store
+                .search_body_evidence("   ", None, 10)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -1356,5 +1375,38 @@ mod tests {
         );
         assert_eq!(matched_term("no brackets here"), None);
         assert_eq!(matched_term("[]"), None);
+    }
+
+    /// Scoping to one paper must happen in the query. Filtering a whole-library
+    /// result set afterwards loses the target paper's matches whenever other
+    /// papers fill the limit first.
+    #[test]
+    fn body_evidence_scoped_to_paper_survives_a_crowded_library() {
+        let store = test_store();
+        // Many papers match the same term; the one we want is inserted last so
+        // a whole-library search with a small limit would not reach it.
+        for i in 0..10 {
+            let noise = Paper::new(format!("noise {i}"));
+            store.insert_paper(&noise).unwrap();
+            store
+                .set_paper_body(&noise.id, "## Intro\nshared keyword here")
+                .unwrap();
+        }
+        let target = Paper::new("target".into());
+        store.insert_paper(&target).unwrap();
+        store
+            .set_paper_body(&target.id, "## Methods\nshared keyword here too")
+            .unwrap();
+
+        let scoped = store
+            .search_body_evidence("keyword", Some(&target.id), 3)
+            .unwrap();
+        assert_eq!(scoped.len(), 1);
+        assert_eq!(scoped[0].paper_id, target.id);
+        assert_eq!(scoped[0].anchor.section.as_deref(), Some("Methods"));
+
+        // Unscoped still searches everything.
+        let all = store.search_body_evidence("keyword", None, 20).unwrap();
+        assert_eq!(all.len(), 11);
     }
 }

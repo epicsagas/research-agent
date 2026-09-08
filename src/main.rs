@@ -402,7 +402,7 @@ fn cmd_query(db: PathBuf, query: String, limit: usize, evidence: bool) -> Result
     // Evidence is a separate pass over stored bodies: it answers "where in the
     // paper", which the ranked paper list cannot.
     if evidence {
-        let hits = store.search_body_evidence(&query, limit)?;
+        let hits = store.search_body_evidence(&query, None, limit)?;
         if hits.is_empty() {
             println!("No body-text matches for '{query}'.");
         } else {

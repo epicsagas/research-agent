@@ -343,15 +343,12 @@ impl ResearchServer {
         };
         // Query mode returns located evidence rather than a wall of text.
         if let Some(query) = p.query.as_deref().filter(|q| !q.trim().is_empty()) {
-            return match store.search_body_evidence(query, 20) {
-                Ok(hits) => {
-                    let matches: Vec<_> = hits.iter().filter(|h| h.paper_id == p.id).collect();
-                    ok_value(json!({
-                        "id": p.id,
-                        "query": query,
-                        "matches": matches,
-                    }))
-                }
+            return match store.search_body_evidence(query, Some(&p.id), 20) {
+                Ok(matches) => ok_value(json!({
+                    "id": p.id,
+                    "query": query,
+                    "matches": matches,
+                })),
                 Err(e) => err_result(e),
             };
         }
