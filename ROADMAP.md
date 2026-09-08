@@ -17,13 +17,6 @@ Classify citations as supporting, disputing, or mentioning (Scite-style).
 Requires a citation-classification data source; none is freely and completely
 available yet, so this waits on a data strategy rather than engineering.
 
-## Domain sources
-
-PubMed / Europe PMC and bioRxiv-style preprint servers as additional
-`PaperSource` adapters. The adapter pattern (`src/ports/paper_source.rs`)
-makes each a small, self-contained addition; they are gated on a concrete
-need from biomedical research workflows.
-
 ## Zotero live integration
 
 Two-way sync with a running Zotero instance (local HTTP API) instead of the

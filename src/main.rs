@@ -39,11 +39,11 @@ enum Commands {
         /// Search query (not required for --source pdf)
         query: Option<String>,
 
-        /// Source: arxiv, s2, openalex, all, or pdf
+        /// Source: arxiv, s2, openalex, europepmc, preprints, all, or pdf
         #[arg(long, default_value = "all")]
         source: String,
 
-        /// Maximum papers to fetch (arxiv/s2/openalex)
+        /// Maximum papers to fetch (arxiv/s2/openalex/europepmc/preprints)
         #[arg(long, default_value_t = 10)]
         limit: usize,
 
@@ -267,6 +267,22 @@ async fn cmd_ingest(
             let pipeline = IngestPipeline::new(&oa, &store);
             let papers = pipeline.run(&q, limit).await?;
             println!("Ingested {} papers from OpenAlex", papers.len());
+            all_papers.extend(papers);
+        }
+
+        if source == "europepmc" || source == "all" {
+            let epmc = research_agent::adapters::europepmc_source::EuropePmcSource::new();
+            let pipeline = IngestPipeline::new(&epmc, &store);
+            let papers = pipeline.run(&q, limit).await?;
+            println!("Ingested {} papers from Europe PMC", papers.len());
+            all_papers.extend(papers);
+        }
+
+        if source == "preprints" || source == "all" {
+            let pre = research_agent::adapters::europepmc_source::PreprintSource::new();
+            let pipeline = IngestPipeline::new(&pre, &store);
+            let papers = pipeline.run(&q, limit).await?;
+            println!("Ingested {} papers from preprint servers", papers.len());
             all_papers.extend(papers);
         }
     }

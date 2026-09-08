@@ -33,7 +33,7 @@ The same binary also works as a standalone CLI for terminals and scripts.
 |--|---------|----------------|
 | 🤖 | MCP server | 15 tools your agent drives directly over stdio — no API key needed |
 | 🧠 | Agent-native analysis | Gap analysis and reports run inside your agent: tools hand over structured state, the agent reasons, results are persisted |
-| 📚 | Paper indexing | arXiv, Semantic Scholar, and local PDF support |
+| 📚 | Paper indexing | arXiv, Semantic Scholar, OpenAlex, Europe PMC (PubMed), bioRxiv-style preprints, and local PDF support |
 | 🔍 | Hybrid search | FTS5 lexical + local-ONNX semantic hits, RRF-fused — works offline |
 | 📂 | Topic trees | Organize research hierarchically with sub-topics |
 | 📖 | Reading tracker | Queue, track, and rate what you've read |
@@ -158,7 +158,7 @@ research --version
 | Command | Description |
 |---------|-------------|
 | `research init` | Initialize research workspace |
-| `research ingest <query> [--source arxiv\|s2\|openalex\|all]` | Ingest papers from arXiv, Semantic Scholar, or OpenAlex |
+| `research ingest <query> [--source arxiv\|s2\|openalex\|europepmc\|preprints\|all]` | Ingest papers from arXiv, Semantic Scholar, OpenAlex, Europe PMC (PubMed), or preprint servers (bioRxiv, medRxiv, …) |
 | `research ingest --source pdf --path <file\|dir>` | Ingest local PDF files (full body text is stored and searchable) |
 | `research import <file\|dir>` | Import BibTeX/BibLaTeX or CSL-JSON files (e.g. a Zotero export) |
 | `research index [--rebuild]` | Build or rebuild search index (FTS + vector index) |
