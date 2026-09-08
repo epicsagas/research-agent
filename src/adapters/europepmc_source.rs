@@ -91,7 +91,10 @@ fn hit_to_paper(hit: EpmcHit) -> Option<Paper> {
     let mut paper = Paper::new(title);
     paper.year = hit.pub_year.and_then(|y| y.parse().ok());
     paper.doi = hit.doi;
-    paper.venue = hit.journal_info.and_then(|ji| ji.journal).and_then(|j| j.title);
+    paper.venue = hit
+        .journal_info
+        .and_then(|ji| ji.journal)
+        .and_then(|j| j.title);
     paper.abstract_text = hit.abstract_text.unwrap_or_default();
     paper.authors = hit
         .author_list
@@ -223,11 +226,16 @@ mod tests {
 
     #[test]
     fn hit_without_title_is_skipped() {
-        let parsed: EpmcResponse = serde_json::from_str(
-            r#"{"resultList": {"result": [{"id": "1", "source": "PPR"}]}}"#,
-        )
-        .unwrap();
-        let hit = parsed.result_list.results.unwrap().into_iter().next().unwrap();
+        let parsed: EpmcResponse =
+            serde_json::from_str(r#"{"resultList": {"result": [{"id": "1", "source": "PPR"}]}}"#)
+                .unwrap();
+        let hit = parsed
+            .result_list
+            .results
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
         assert!(hit_to_paper(hit).is_none());
     }
 
