@@ -4,13 +4,6 @@ Shipped capabilities live in the [README](README.md) and
 [CHANGELOG](CHANGELOG.md); this file tracks what is deliberately **not** built
 yet. Items are ordered by expected value, not scheduled.
 
-## Citation graph
-
-Paper-to-paper relationships (references, citations, related work) via the
-Semantic Scholar citations API or OpenAlex `referenced_works`. Powers "what
-should I read next from this paper" and coverage views that follow edges, not
-just keywords.
-
 ## Support / dispute citation context
 
 Classify citations as supporting, disputing, or mentioning (Scite-style).

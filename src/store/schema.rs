@@ -111,6 +111,16 @@ END;
 
 -- Full extracted body text lives outside `papers` so the Paper domain type and
 -- every tool response stay small; FTS5 searches it through its own index.
+-- Paper-to-paper reference edges (citation graph). Logical keys only: a
+-- referenced paper may be ingested in the same call as the citing one, so
+-- foreign keys would force an ordering the fetch cannot guarantee.
+CREATE TABLE IF NOT EXISTS citations (
+    citing_paper_id TEXT NOT NULL,
+    cited_paper_id TEXT NOT NULL,
+    context TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (citing_paper_id, cited_paper_id)
+);
+
 CREATE TABLE IF NOT EXISTS paper_bodies (
     paper_id TEXT PRIMARY KEY REFERENCES papers(id) ON DELETE CASCADE,
     body TEXT NOT NULL DEFAULT ''

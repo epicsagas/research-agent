@@ -360,6 +360,38 @@ impl ResearchServer {
     }
 
     #[tool(
+        description = "Fetch and store the references (citation graph edges) of a paper via OpenAlex, ingesting newly seen referenced papers into the library. Requires the paper to have an OpenAlex id or DOI. Idempotent. Network-heavy (async)."
+    )]
+    pub async fn paper_references(
+        &self,
+        Parameters(p): Parameters<PaperReferencesParams>,
+    ) -> CallToolResult {
+        let store = match open_store(&self.ctx.db_path) {
+            Ok(s) => s,
+            Err(e) => return err_result(e),
+        };
+        let paper = match store.get_paper(&p.id) {
+            Ok(Some(paper)) => paper,
+            Ok(None) => {
+                return err_result(ResearchError::NotFound(format!("paper '{}' not found", p.id)))
+            }
+            Err(e) => return err_result(e),
+        };
+        match crate::application::references::sync_references(&store, &paper).await {
+            Ok((papers, new_edges)) => match store.citations_for_paper(&p.id) {
+                Ok(edges) => ok_value(json!({
+                    "id": p.id,
+                    "references": edges.len(),
+                    "new_edges": new_edges,
+                    "new_papers": papers,
+                })),
+                Err(e) => err_result(e),
+            },
+            Err(e) => err_result(e),
+        }
+    }
+
+    #[tool(
         description = "Search the local paper index by query (hybrid lexical+semantic when the embedding backend is available, lexical otherwise). Returns matching papers (id, title, authors, year, status)."
     )]
     pub fn query_papers(&self, Parameters(p): Parameters<QueryPapersParams>) -> CallToolResult {

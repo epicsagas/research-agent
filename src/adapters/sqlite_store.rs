@@ -2,6 +2,7 @@ use std::sync::Mutex;
 
 use rusqlite::{Connection, params};
 
+use crate::domain::citation::Citation;
 use crate::domain::knowledge_gap::{GapType, KnowledgeGap};
 use crate::domain::paper::{Paper, PaperStatus, Rating, ReadingStatus};
 use crate::domain::research_report::ResearchReport;
@@ -154,6 +155,18 @@ impl IndexStore for SqliteStore {
         })?;
         let mut stmt = conn.prepare("SELECT * FROM papers WHERE doi = ?1 LIMIT 1")?;
         let mut rows = stmt.query(params![doi])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(Self::paper_from_row(row)?)),
+            None => Ok(None),
+        }
+    }
+
+    fn find_paper_by_openalex_id(&self, openalex_id: &str) -> Result<Option<Paper>> {
+        let conn = self.conn.lock().map_err(|e| {
+            ResearchError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let mut stmt = conn.prepare("SELECT * FROM papers WHERE openalex_id = ?1 LIMIT 1")?;
+        let mut rows = stmt.query(params![openalex_id])?;
         match rows.next()? {
             Some(row) => Ok(Some(Self::paper_from_row(row)?)),
             None => Ok(None),
@@ -609,6 +622,48 @@ impl IndexStore for SqliteStore {
         Ok(reports)
     }
 
+    fn insert_citations(&self, citations: &[Citation]) -> Result<usize> {
+        let mut conn = self.conn.lock().map_err(|e| {
+            ResearchError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let tx = conn.transaction()?;
+        let mut inserted = 0usize;
+        for c in citations {
+            // INSERT OR IGNORE: the pair is the PK, so re-running a reference
+            // fetch is a no-op for edges already stored.
+            let n = tx.execute(
+                "INSERT OR IGNORE INTO citations (citing_paper_id, cited_paper_id, context)
+                 VALUES (?1, ?2, ?3)",
+                params![c.citing_paper_id, c.cited_paper_id, c.context],
+            )?;
+            inserted += n;
+        }
+        tx.commit()?;
+        Ok(inserted)
+    }
+
+    fn citations_for_paper(&self, paper_id: &str) -> Result<Vec<Citation>> {
+        let conn = self.conn.lock().map_err(|e| {
+            ResearchError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let mut stmt = conn.prepare(
+            "SELECT citing_paper_id, cited_paper_id, context
+             FROM citations WHERE citing_paper_id = ?1 ORDER BY rowid",
+        )?;
+        let rows = stmt.query_map(params![paper_id], |row| {
+            Ok(Citation {
+                citing_paper_id: row.get(0)?,
+                cited_paper_id: row.get(1)?,
+                context: row.get(2)?,
+            })
+        })?;
+        let mut citations = Vec::new();
+        for c in rows {
+            citations.push(c?);
+        }
+        Ok(citations)
+    }
+
     fn rebuild_index(&self) -> Result<()> {
         let conn = self.conn.lock().map_err(|e| {
             ResearchError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
@@ -715,6 +770,38 @@ mod tests {
     fn get_missing_paper_returns_none() {
         let store = test_store();
         assert!(store.get_paper("nonexistent").unwrap().is_none());
+    }
+
+    #[test]
+    fn citations_roundtrip_and_dedupe() {
+        let store = test_store();
+        let citing = Paper::new("citing".into());
+        let cited = Paper::new("cited".into());
+        store.insert_paper(&citing).unwrap();
+        store.insert_paper(&cited).unwrap();
+
+        let edge = Citation::new(citing.id.clone(), cited.id.clone());
+        // Inserting the same edge twice must be a no-op the second time.
+        let first = [edge.clone()];
+        assert_eq!(store.insert_citations(&first).unwrap(), 1);
+        assert_eq!(store.insert_citations(&first).unwrap(), 0);
+
+        let edges = store.citations_for_paper(&citing.id).unwrap();
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].cited_paper_id, cited.id);
+        assert!(store.citations_for_paper("unknown").unwrap().is_empty());
+    }
+
+    #[test]
+    fn find_paper_by_openalex_id() {
+        let store = test_store();
+        let mut paper = Paper::new("oa paper".into());
+        paper.openalex_id = Some("W2741809807".into());
+        store.insert_paper(&paper).unwrap();
+
+        let got = store.find_paper_by_openalex_id("W2741809807").unwrap();
+        assert_eq!(got.unwrap().id, paper.id);
+        assert!(store.find_paper_by_openalex_id("W1").unwrap().is_none());
     }
 
     #[test]

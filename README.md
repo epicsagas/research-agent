@@ -31,8 +31,9 @@ The same binary also works as a standalone CLI for terminals and scripts.
 
 | | Feature | Why it matters |
 |--|---------|----------------|
-| 🤖 | MCP server | 15 tools your agent drives directly over stdio — no API key needed |
+| 🤖 | MCP server | 16 tools your agent drives directly over stdio — no API key needed |
 | 🧠 | Agent-native analysis | Gap analysis and reports run inside your agent: tools hand over structured state, the agent reasons, results are persisted |
+| 🔗 | Citation graph | Paper-to-paper reference edges from OpenAlex power "what should I read next from this paper" |
 | 📚 | Paper indexing | arXiv, Semantic Scholar, OpenAlex, Europe PMC (PubMed), bioRxiv-style preprints, and local PDF support |
 | 🔍 | Hybrid search | FTS5 lexical + local-ONNX semantic hits, RRF-fused — works offline |
 | 📂 | Topic trees | Organize research hierarchically with sub-topics |
@@ -99,10 +100,10 @@ The plugin auto-installs the `research` binary on session start and starts the
 **stdio MCP server** (`research mcp`) — the agent discovers and calls the tools
 directly; no human typing CLI commands.
 
-**Tools** (15): `init` · `ingest` · `index_rebuild` · `import_papers` ·
-`paper_body` · `query_papers` · `topic_brief` · `gaps_record` · `list_gaps` ·
-`report_material` · `report_save` · `topics_list` · `topic_add` · `state` ·
-`update_read`.
+**Tools** (16): `init` · `ingest` · `index_rebuild` · `import_papers` ·
+`paper_body` · `paper_references` · `query_papers` · `topic_brief` ·
+`gaps_record` · `list_gaps` · `report_material` · `report_save` ·
+`topics_list` · `topic_add` · `state` · `update_read`.
 
 Analysis is **agent-native**: `topic_brief` and `report_material` hand over the
 structured library state (papers, reading progress, recorded gaps, coverage),

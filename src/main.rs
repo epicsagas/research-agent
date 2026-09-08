@@ -73,6 +73,12 @@ enum Commands {
         limit: usize,
     },
 
+    /// Fetch and store the references of a paper (citation graph)
+    References {
+        /// Paper ID
+        id: String,
+    },
+
     /// Analyze knowledge gaps
     Gaps {
         /// Topic ID to analyze
@@ -172,6 +178,7 @@ async fn main() -> Result<()> {
         } => cmd_ingest(db, query, source, limit, path, topic).await?,
         Commands::Index { rebuild } => cmd_index(db, rebuild)?,
         Commands::Query { query, limit } => cmd_query(db, query, limit)?,
+        Commands::References { id } => cmd_references(db, id).await?,
         Commands::Gaps { topic } => cmd_gaps(db, topic).await?,
         Commands::Report { title, topic } => cmd_report(db, title, topic).await?,
         Commands::Topics { action } => cmd_topics(db, action)?,
@@ -378,6 +385,45 @@ fn cmd_query(db: PathBuf, query: String, limit: usize) -> Result<()> {
             println!();
         }
         println!("{} paper(s) found.", results.len());
+    }
+    Ok(())
+}
+
+async fn cmd_references(db: PathBuf, id: String) -> Result<()> {
+    let store = open_store(&db)?;
+    let paper = store
+        .get_paper(&id)?
+        .ok_or_else(|| anyhow::anyhow!("paper '{id}' not found"))?;
+
+    // Fresh fetch; falls back to stored edges when the paper has no OpenAlex
+    // identity or the network call fails, so "what should I read next" still
+    // answers from earlier syncs.
+    let (papers, new_edges) =
+        match research_agent::application::references::sync_references(&store, &paper).await {
+            Ok((papers, new_edges)) => (papers, new_edges),
+            Err(e) => {
+                eprintln!("Warning: reference fetch failed ({e}); showing stored edges.");
+                (Vec::new(), 0)
+            }
+        };
+
+    let edges = store.citations_for_paper(&id)?;
+    if edges.is_empty() {
+        println!("No references known for '{id}'.");
+        return Ok(());
+    }
+    println!(
+        "{} reference(s) ({} new), ingested {} new paper(s):",
+        edges.len(),
+        new_edges,
+        papers.len()
+    );
+    for edge in &edges {
+        let title = match store.get_paper(&edge.cited_paper_id)? {
+            Some(p) => p.title,
+            None => "(paper not in library)".into(),
+        };
+        println!("- [{}] {}", edge.cited_paper_id, title);
     }
     Ok(())
 }

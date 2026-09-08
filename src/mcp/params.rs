@@ -45,6 +45,12 @@ pub struct PaperBodyParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct PaperReferencesParams {
+    /// Paper id.
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct QueryPapersParams {
     pub query: String,
     /// Maximum results (default 20).
