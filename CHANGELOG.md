@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Page anchors and evidence snippets for PDF bodies**: PDF ingest now extracts per page and writes `<!-- page N -->` markers into the stored body, so a match can be traced back to where it appeared. `research query <q> --evidence` prints the matching body text with its section and page, and the MCP `paper_body` tool accepts a `query` parameter that returns located snippets instead of the whole body (far cheaper on an agent's context). Bodies stored before this change keep working and still resolve their section; `research reingest --missing-pages` re-extracts them in place, skipping papers whose source PDF has moved.
+- **Importer field recovery**: `research import` now reads abstracts and keywords/tags from BibTeX and CSL-JSON, and accepts Zotero's native JSON export (dispatched by content, since it and CSL-JSON are both `.json`). Abstracts matter most here: the field feeds gap analysis and the search index, so imported papers previously landed semantically empty next to ingested ones.
+
+### Changed
+- DOIs are normalized (resolver prefix stripped, lowercased) before import dedupe, so `10.1/X`, `https://doi.org/10.1/X`, and `10.1/x` resolve to one paper instead of three rows.
+
 ## [0.1.0] - 2026-09-08
 
 ### Added

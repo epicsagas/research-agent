@@ -1,3 +1,4 @@
+pub mod anchor;
 pub mod citation;
 pub mod knowledge_gap;
 pub mod paper;

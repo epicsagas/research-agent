@@ -8,6 +8,30 @@ pub struct PdfSource;
 /// Longest stored body text, in chars.
 const MAX_BODY_CHARS: usize = 500_000;
 
+/// Inline page marker written between extracted pages. HTML-comment syntax so
+/// it stays inert if a body is ever rendered as markdown, and distinctive
+/// enough to scan backwards for when resolving a match to its page.
+pub const PAGE_MARKER_PREFIX: &str = "<!-- page ";
+
+fn page_marker(n: usize) -> String {
+    format!("{PAGE_MARKER_PREFIX}{n} -->")
+}
+
+/// Join per-page text with page markers so a stored body keeps its page
+/// boundaries. Pages arrive in document order.
+fn join_pages(pages: &[String]) -> String {
+    let mut out = String::new();
+    for (i, page) in pages.iter().enumerate() {
+        out.push_str(&page_marker(i + 1));
+        out.push('\n');
+        out.push_str(page);
+        if !page.ends_with('\n') {
+            out.push('\n');
+        }
+    }
+    out
+}
+
 /// Recognized section headings (one per line) get `## ` markers so the stored
 /// body keeps its skeleton and downstream readers can cite a section.
 fn section_heading_re() -> &'static regex::Regex {
@@ -62,12 +86,16 @@ impl PdfSource {
     pub fn ingest_file(&self, path: &Path) -> Result<(Paper, Option<String>)> {
         let bytes = std::fs::read(path)?;
 
-        let text = pdf_extract::extract_text_from_mem(&bytes).map_err(|e| {
+        // Per-page extraction keeps page boundaries, which whole-document
+        // extraction discards. Same engine underneath, so output is unchanged
+        // apart from the markers.
+        let pages = pdf_extract::extract_text_from_mem_by_pages(&bytes).map_err(|e| {
             ResearchError::Source(format!(
                 "PDF text extraction failed for {}: {e}",
                 path.display()
             ))
         })?;
+        let text = join_pages(&pages);
 
         let title = path
             .file_stem()
@@ -147,5 +175,30 @@ mod tests {
     #[test]
     fn source_name() {
         assert_eq!(PdfSource::new().name(), "pdf");
+    }
+
+    #[test]
+    fn joins_pages_with_markers() {
+        let joined = join_pages(&["first page".into(), "second page".into()]);
+        assert!(joined.starts_with("<!-- page 1 -->\nfirst page"));
+        assert!(joined.contains("<!-- page 2 -->\nsecond page"));
+        // Every page contributes exactly one marker.
+        assert_eq!(joined.matches(PAGE_MARKER_PREFIX).count(), 2);
+    }
+
+    /// Markers must survive section marking, since anchoring reads both.
+    #[test]
+    fn page_markers_survive_prepare_body() {
+        let joined = join_pages(&["Introduction\ntext here".into(), "Results\nmore".into()]);
+        let body = prepare_body(&joined).unwrap();
+        assert!(body.contains("<!-- page 1 -->"));
+        assert!(body.contains("<!-- page 2 -->"));
+        assert!(body.contains("## Introduction"));
+        assert!(body.contains("## Results"));
+    }
+
+    #[test]
+    fn empty_page_list_yields_no_body() {
+        assert!(prepare_body(&join_pages(&[])).is_none());
     }
 }

@@ -334,13 +334,27 @@ impl ResearchServer {
     }
 
     #[tool(
-        description = "Fetch the stored full body text of a paper (from PDF ingest), section headings marked with '## '. Returns text, or has_body=false if only metadata is stored."
+        description = "Fetch the stored full body text of a paper (from PDF ingest), section headings marked with '## ' and page boundaries with '<!-- page N -->'. Pass query to get matching snippets with their section and page instead of the whole body — far cheaper on context. Returns has_body=false if only metadata is stored."
     )]
     pub fn paper_body(&self, Parameters(p): Parameters<PaperBodyParams>) -> CallToolResult {
         let store = match open_store(&self.ctx.db_path) {
             Ok(s) => s,
             Err(e) => return err_result(e),
         };
+        // Query mode returns located evidence rather than a wall of text.
+        if let Some(query) = p.query.as_deref().filter(|q| !q.trim().is_empty()) {
+            return match store.search_body_evidence(query, 20) {
+                Ok(hits) => {
+                    let matches: Vec<_> = hits.iter().filter(|h| h.paper_id == p.id).collect();
+                    ok_value(json!({
+                        "id": p.id,
+                        "query": query,
+                        "matches": matches,
+                    }))
+                }
+                Err(e) => err_result(e),
+            };
+        }
         match store.get_paper_body(&p.id) {
             Ok(Some(body)) => {
                 // Cap what flows into an agent's context window; the full text

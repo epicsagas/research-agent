@@ -9,7 +9,7 @@ use crate::domain::research_report::ResearchReport;
 use crate::domain::research_state::ResearchState;
 use crate::domain::research_topic::ResearchTopic;
 use crate::error::{ResearchError, Result};
-use crate::ports::index_store::IndexStore;
+use crate::ports::index_store::{BodyEvidence, IndexStore};
 use crate::store::schema::{MIGRATION_SQL, SCHEMA_SQL, TARGET_SCHEMA_VERSION};
 
 pub struct SqliteStore {
@@ -28,6 +28,15 @@ fn fts_phrase_query(raw: &str) -> String {
         .map(|t| format!("\"{t}\""))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// The first bracketed run in an FTS5 `snippet()` result, i.e. the text that
+/// actually matched. `None` when the snippet carries no bracket pair.
+fn matched_term(snippet: &str) -> Option<&str> {
+    let start = snippet.find('[')? + 1;
+    let end = snippet[start..].find(']')? + start;
+    let term = &snippet[start..end];
+    (!term.is_empty()).then_some(term)
 }
 
 impl SqliteStore {
@@ -338,6 +347,53 @@ impl IndexStore for SqliteStore {
         }
         papers.truncate(limit);
         Ok(papers)
+    }
+
+    fn search_body_evidence(&self, query: &str, limit: usize) -> Result<Vec<BodyEvidence>> {
+        let conn = self.conn.lock().map_err(|e| {
+            ResearchError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let fts_query = fts_phrase_query(query);
+        if fts_query.is_empty() {
+            return Ok(Vec::new());
+        }
+        // snippet() gives the matching window with terms bracketed; the body
+        // itself comes back so the match can be located for anchoring.
+        let mut stmt = conn.prepare(
+            "SELECT p.id, p.title, pb.body,
+                    snippet(bodies_fts, 0, '[', ']', '…', 32) AS snip
+             FROM papers p
+             JOIN paper_bodies pb ON pb.paper_id = p.id
+             JOIN bodies_fts fts ON fts.rowid = pb.rowid
+             WHERE bodies_fts MATCH ?1
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![fts_query, limit as i64], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (paper_id, title, body, snippet) = row?;
+            // Anchor on the matched term itself, which snippet() brackets.
+            // Anchoring on surrounding context instead would land on the
+            // leading edge of the window and can sit *before* the very heading
+            // the match falls under.
+            let offset = matched_term(&snippet)
+                .and_then(|term| body.find(term))
+                .unwrap_or(0);
+            out.push(BodyEvidence {
+                paper_id,
+                title,
+                snippet,
+                anchor: crate::domain::anchor::resolve(&body, offset),
+            });
+        }
+        Ok(out)
     }
 
     fn list_papers(&self, limit: Option<usize>) -> Result<Vec<Paper>> {
@@ -1255,5 +1311,50 @@ mod tests {
         store
             .update_rating(&paper.id, Rating::new(4).unwrap())
             .unwrap();
+    }
+
+    /// A body hit must say where in the paper it matched, not just which
+    /// paper — that is the whole point of storing bodies.
+    #[test]
+    fn body_evidence_carries_snippet_and_anchor() {
+        let store = test_store();
+        let paper = Paper::new("thermometry paper".into());
+        store.insert_paper(&paper).unwrap();
+        let body = "<!-- page 1 -->\nintro\n## Methods\nwe used nanodiamond probes\n<!-- page 2 -->\n## Results\nthe readout was stable\n";
+        store.set_paper_body(&paper.id, body).unwrap();
+
+        let hits = store.search_body_evidence("nanodiamond", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].paper_id, paper.id);
+        assert!(hits[0].snippet.contains("nanodiamond"));
+        assert_eq!(hits[0].anchor.section.as_deref(), Some("Methods"));
+        assert_eq!(hits[0].anchor.page, Some(1));
+
+        let hits = store.search_body_evidence("readout", 10).unwrap();
+        assert_eq!(hits[0].anchor.section.as_deref(), Some("Results"));
+        assert_eq!(hits[0].anchor.page, Some(2));
+    }
+
+    #[test]
+    fn body_evidence_empty_for_nonmatching_or_blank_query() {
+        let store = test_store();
+        let paper = Paper::new("p".into());
+        store.insert_paper(&paper).unwrap();
+        store
+            .set_paper_body(&paper.id, "## Intro\nsome text")
+            .unwrap();
+
+        assert!(store.search_body_evidence("absent", 10).unwrap().is_empty());
+        assert!(store.search_body_evidence("   ", 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn matched_term_extracts_bracketed_run() {
+        assert_eq!(
+            matched_term("…## Results\nthe [readout] was stable"),
+            Some("readout")
+        );
+        assert_eq!(matched_term("no brackets here"), None);
+        assert_eq!(matched_term("[]"), None);
     }
 }

@@ -1,3 +1,4 @@
+use crate::domain::anchor::Anchor;
 use crate::domain::citation::Citation;
 use crate::domain::knowledge_gap::KnowledgeGap;
 use crate::domain::paper::{Paper, PaperStatus, Rating, ReadingStatus};
@@ -69,7 +70,22 @@ pub trait IndexStore: Send + Sync {
     /// stored edge are ignored. Returns how many rows changed.
     fn set_citation_contexts(&self, citations: &[Citation]) -> Result<usize>;
 
+    /// Body-text matches for `query`, each carrying the matching snippet and
+    /// where in the document it sits. Papers whose body is not stored (no PDF
+    /// ingest) cannot match.
+    fn search_body_evidence(&self, query: &str, limit: usize) -> Result<Vec<BodyEvidence>>;
+
     // Index management
     fn rebuild_index(&self) -> Result<()>;
     fn init_schema(&self) -> Result<()>;
+}
+
+/// One body-text match: which paper, the surrounding text, and where it sits.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct BodyEvidence {
+    pub paper_id: String,
+    pub title: String,
+    /// Matching text with surrounding context; match terms are bracketed.
+    pub snippet: String,
+    pub anchor: Anchor,
 }

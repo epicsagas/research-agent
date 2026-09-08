@@ -161,9 +161,10 @@ research --version
 | `research init` | Initialize research workspace |
 | `research ingest <query> [--source arxiv\|s2\|openalex\|europepmc\|preprints\|all]` | Ingest papers from arXiv, Semantic Scholar, OpenAlex, Europe PMC (PubMed), or preprint servers (bioRxiv, medRxiv, …) |
 | `research ingest --source pdf --path <file\|dir>` | Ingest local PDF files (full body text is stored and searchable) |
-| `research import <file\|dir>` | Import BibTeX/BibLaTeX or CSL-JSON files (e.g. a Zotero export) |
+| `research import <file\|dir>` | Import BibTeX/BibLaTeX, CSL-JSON, or Zotero-native JSON files (e.g. a Zotero export) |
 | `research index [--rebuild]` | Build or rebuild search index (FTS + vector index) |
-| `research query <q>` | Search papers — hybrid lexical+semantic when embeddings are available |
+| `research reingest [--missing-pages]` | Re-extract stored PDF bodies (adds page markers to bodies ingested before they existed) |
+| `research query <q> [--evidence]` | Search papers — hybrid lexical+semantic when embeddings are available; `--evidence` also shows the matching body text with its section and page |
 | `research references <id> [--cited-by] [--intents]` | Fetch citation-graph edges from OpenAlex; `--cited-by` reverses the direction, `--intents` labels edges with Semantic Scholar citation intents |
 | `research gaps [--topic <id>]` | Analyze knowledge gaps (CLI: uses `[llm]` if configured) |
 | `research report --topic <id>` | Generate research report (CLI: uses `[llm]` if configured) |

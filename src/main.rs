@@ -71,6 +71,10 @@ enum Commands {
         /// Maximum results
         #[arg(long, default_value_t = 20)]
         limit: usize,
+
+        /// Also show matching body text with its section and page
+        #[arg(long)]
+        evidence: bool,
     },
 
     /// Fetch and store the references of a paper (citation graph)
@@ -84,6 +88,14 @@ enum Commands {
         /// (background/methodology/result, influential)
         #[arg(long)]
         intents: bool,
+    },
+
+    /// Re-extract stored PDF bodies (adds page markers to bodies ingested
+    /// before they existed)
+    Reingest {
+        /// Only papers whose stored body has no page markers
+        #[arg(long)]
+        missing_pages: bool,
     },
 
     /// Analyze knowledge gaps
@@ -184,12 +196,17 @@ async fn main() -> Result<()> {
             topic,
         } => cmd_ingest(db, query, source, limit, path, topic).await?,
         Commands::Index { rebuild } => cmd_index(db, rebuild)?,
-        Commands::Query { query, limit } => cmd_query(db, query, limit)?,
+        Commands::Query {
+            query,
+            limit,
+            evidence,
+        } => cmd_query(db, query, limit, evidence)?,
         Commands::References {
             id,
             cited_by,
             intents,
         } => cmd_references(db, id, cited_by, intents).await?,
+        Commands::Reingest { missing_pages } => cmd_reingest(db, missing_pages)?,
         Commands::Gaps { topic } => cmd_gaps(db, topic).await?,
         Commands::Report { title, topic } => cmd_report(db, title, topic).await?,
         Commands::Topics { action } => cmd_topics(db, action)?,
@@ -375,12 +392,40 @@ fn open_hybrid(
     )
 }
 
-fn cmd_query(db: PathBuf, query: String, limit: usize) -> Result<()> {
+fn cmd_query(db: PathBuf, query: String, limit: usize, evidence: bool) -> Result<()> {
     let store = open_store(&db)?;
     let results = match open_hybrid(&store, &db) {
         Some(hybrid) => hybrid.search(&store, &query, limit)?,
         None => store.search_papers(&query, limit)?,
     };
+
+    // Evidence is a separate pass over stored bodies: it answers "where in the
+    // paper", which the ranked paper list cannot.
+    if evidence {
+        let hits = store.search_body_evidence(&query, limit)?;
+        if hits.is_empty() {
+            println!("No body-text matches for '{query}'.");
+        } else {
+            println!("Body matches:");
+            for hit in &hits {
+                let mut place = Vec::new();
+                if let Some(section) = &hit.anchor.section {
+                    place.push(section.clone());
+                }
+                if let Some(page) = hit.anchor.page {
+                    place.push(format!("p.{page}"));
+                }
+                let place = if place.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({})", place.join(", "))
+                };
+                println!("- [{}] {}{}", hit.paper_id, hit.title, place);
+                println!("    {}", hit.snippet.replace('\n', " "));
+            }
+            println!();
+        }
+    }
     if results.is_empty() {
         println!("No papers found for '{query}'.");
     } else {
@@ -471,6 +516,60 @@ async fn cmd_references(db: PathBuf, id: String, cited_by: bool, intents: bool) 
         } else {
             println!("- [{other_id}] {title} ({})", edge.context);
         }
+    }
+    Ok(())
+}
+
+/// Re-extract bodies for papers ingested from a local PDF. Idempotent:
+/// `set_paper_body` replaces, so a re-run costs time and nothing else.
+fn cmd_reingest(db: PathBuf, missing_pages: bool) -> Result<()> {
+    use research_agent::adapters::pdf_source::{PAGE_MARKER_PREFIX, PdfSource};
+
+    let store = open_store(&db)?;
+    let src = PdfSource::new();
+    let (mut done, mut skipped, mut failed) = (0usize, 0usize, 0usize);
+
+    for paper in store.list_papers(None)? {
+        let Some(pdf_path) = paper.pdf_path.as_deref() else {
+            continue;
+        };
+        if missing_pages {
+            // Already re-extracted, or ingested after markers shipped.
+            let has_markers = store
+                .get_paper_body(&paper.id)?
+                .is_some_and(|b| b.contains(PAGE_MARKER_PREFIX));
+            if has_markers {
+                skipped += 1;
+                continue;
+            }
+        }
+        let path = std::path::Path::new(pdf_path);
+        if !path.exists() {
+            // pdf_path is absolute and canonicalized at ingest, so a moved or
+            // deleted file is expected rather than exceptional.
+            eprintln!("Skipped (PDF missing): {} — {pdf_path}", paper.title);
+            skipped += 1;
+            continue;
+        }
+        match src.ingest_file(path) {
+            Ok((_, Some(body))) => {
+                store.set_paper_body(&paper.id, &body)?;
+                done += 1;
+            }
+            Ok((_, None)) => {
+                eprintln!("Skipped (no text extracted): {}", paper.title);
+                skipped += 1;
+            }
+            Err(e) => {
+                eprintln!("Failed: {} — {e}", paper.title);
+                failed += 1;
+            }
+        }
+    }
+
+    println!("Re-ingested {done} paper(s), skipped {skipped}, failed {failed}.");
+    if done > 0 {
+        println!("Run `research index --rebuild` to re-embed the updated bodies.");
     }
     Ok(())
 }
