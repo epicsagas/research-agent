@@ -1,10 +1,10 @@
-//! File import pipeline: BibTeX/BibLaTeX or CSL-JSON files → store, with DOI
-//! de-duplication. Shared by the `research import` CLI command and the MCP
-//! `import_papers` tool.
+//! File import pipeline: BibTeX/BibLaTeX, CSL-JSON, or Zotero-native JSON
+//! files → store, with DOI de-duplication. Shared by the `research import`
+//! CLI command and the MCP `import_papers` tool.
 
 use std::path::{Path, PathBuf};
 
-use crate::adapters::bib_importer::{parse_bibtex, parse_csl_json};
+use crate::adapters::bib_importer::{parse_bibtex, parse_json_auto};
 use crate::domain::paper::Paper;
 use crate::error::{ResearchError, Result};
 use crate::ports::index_store::IndexStore;
@@ -43,7 +43,9 @@ pub fn run_import(store: &dyn IndexStore, path: &Path) -> Result<ImportSummary> 
             .to_ascii_lowercase();
         let parsed = match ext.as_str() {
             "bib" | "bibtex" => parse_bibtex(&content),
-            "json" => parse_csl_json(&content),
+            // Both CSL-JSON and Zotero's native export are `.json`; the
+            // parser is picked by content, not by extension.
+            "json" => parse_json_auto(&content),
             other => Err(ResearchError::Source(format!(
                 "unsupported import format: .{other} (use .bib or .json)"
             ))),
