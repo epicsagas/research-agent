@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0] - 2026-09-08
 
 ### Added
 - **Citation intents**: `research references <id> --intents` and the MCP `paper_references` tool with `intents: true` label existing citation-graph edges with Semantic Scholar's per-edge intents (`background`, `methodology`, `result`) plus its `isInfluential` flag, stored in the `citations.context` column and shown next to each edge. Labeling only touches edges the graph already holds and never invents new ones. Semantic Scholar classifies only a fraction of edges upstream (roughly 30-80% in sampling), so partial labeling is the expected result, and the command reports how many edges were left unlabeled.
@@ -16,17 +16,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Hybrid search**: `research query` and `query_papers` now fuse FTS5 lexical hits with semantic hits from a local vector index (llm-kernel `TurbovecIndex`, RRF fusion), persisted at `~/.research/embeddings.idx` and rebuilt automatically when stale (`research index --rebuild` forces it). The default embedding backend is a bundled small ONNX model (BGESmallENV15, 384-dim) using CoreML on Apple Silicon, DirectML on Windows, CPU elsewhere; `[search]` in `config.toml` switches to OpenAI (BYOK) or a different local model. Every failure degrades gracefully to lexical-only search.
 - **Full-body storage for PDFs**: PDF ingest no longer discards the extracted text — the body is section-marked (`## Heading`) and stored in a separate `paper_bodies` table, searched by FTS5 and embedded for hybrid search. Read it back with `research read <id> --body` or the MCP `paper_body` tool (tool responses are capped at 40k chars).
 - MCP tools `import_papers` and `paper_body` (13 → 15 tools).
-
-### Changed
-- Release targets drop the two `*-musl` platforms: the bundled ONNX runtime has no musl prebuilts and requires glibc ≥ 2.38 (Linux binaries now target Ubuntu 24.04+).
-
-## [0.1.0] - Unreleased
-
-### Fixed
-- **Topic-scoped analysis**: `analyze_gaps` and `generate_report` now build their LLM context from papers belonging to the requested topic only. Previously both called `list_papers(N)` returning arbitrary recent papers, so gap analysis and reports described the wrong papers (and `generate_report` emitted the same 5 arbitrary papers for every topic). Adds `IndexStore::list_papers_by_topic`; empty topics return an explicit placeholder instead of leaking unlinked papers.
-- Pre-existing `cargo fmt` violations in `src/config.rs` and `src/mcp/server.rs` resolved.
-
-### Added
 - Paper indexing with arXiv and Semantic Scholar source adapters
 - SQLite storage with FTS5 full-text search
 - Research topic management with hierarchical trees
@@ -51,9 +40,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Paper.rating` column added via automatic SQLite migration (safe for existing databases)
 
 ### Changed
+- Release targets drop the two `*-musl` platforms: the bundled ONNX runtime has no musl prebuilts and requires glibc ≥ 2.38 (Linux binaries now target Ubuntu 24.04+).
 - Upgraded `llm-kernel` from `0.9.x` to `0.10` (0.10.0 released). This project consumes only the default provider catalog, which is unchanged in 0.10.0 — no behavior regression. Closes #10.
 - README restructured to the epicsagas install standard (curl → irm → Homebrew) with a matching Updating table and an MCP-server section.
 - `SqliteStore::open` now sets a 5s `busy_timeout`, so concurrent handles (e.g. parallel MCP tool calls each running `init_schema`) no longer surface "database is locked".
 - `research ingest` query argument is now optional (not required when `--source pdf`)
 - `research topics` now uses subcommands: `topics list` and `topics add <name>`
 - `research topics list` now indents sub-topics by depth (2 spaces per level)
+
+### Fixed
+- **Topic-scoped analysis**: `analyze_gaps` and `generate_report` now build their LLM context from papers belonging to the requested topic only. Previously both called `list_papers(N)` returning arbitrary recent papers, so gap analysis and reports described the wrong papers (and `generate_report` emitted the same 5 arbitrary papers for every topic). Adds `IndexStore::list_papers_by_topic`; empty topics return an explicit placeholder instead of leaking unlinked papers.
+- Pre-existing `cargo fmt` violations in `src/config.rs` and `src/mcp/server.rs` resolved.
