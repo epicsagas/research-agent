@@ -398,12 +398,12 @@ async fn cmd_references(db: PathBuf, id: String) -> Result<()> {
     // Fresh fetch; falls back to stored edges when the paper has no OpenAlex
     // identity or the network call fails, so "what should I read next" still
     // answers from earlier syncs.
-    let (papers, new_edges) =
+    let (_papers, new_edges, new_papers) =
         match research_agent::application::references::sync_references(&store, &paper).await {
-            Ok((papers, new_edges)) => (papers, new_edges),
+            Ok((papers, new_edges, new_papers)) => (papers, new_edges, new_papers),
             Err(e) => {
                 eprintln!("Warning: reference fetch failed ({e}); showing stored edges.");
-                (Vec::new(), 0)
+                (Vec::new(), 0, 0)
             }
         };
 
@@ -416,7 +416,7 @@ async fn cmd_references(db: PathBuf, id: String) -> Result<()> {
         "{} reference(s) ({} new), ingested {} new paper(s):",
         edges.len(),
         new_edges,
-        papers.len()
+        new_papers
     );
     for edge in &edges {
         let title = match store.get_paper(&edge.cited_paper_id)? {

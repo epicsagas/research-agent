@@ -378,12 +378,15 @@ impl ResearchServer {
             Err(e) => return err_result(e),
         };
         match crate::application::references::sync_references(&store, &paper).await {
-            Ok((papers, new_edges)) => match store.citations_for_paper(&p.id) {
+            Ok((papers, new_edges, new_papers)) => match store.citations_for_paper(&p.id) {
                 Ok(edges) => ok_value(json!({
                     "id": p.id,
                     "references": edges.len(),
                     "new_edges": new_edges,
-                    "new_papers": papers,
+                    "new_papers_count": new_papers,
+                    // Resolved reference papers (metadata only); already-known
+                    // entries are included so the agent can see the full list.
+                    "referenced_papers": papers,
                 })),
                 Err(e) => err_result(e),
             },

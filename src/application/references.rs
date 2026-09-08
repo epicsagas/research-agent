@@ -6,16 +6,19 @@ use crate::ports::index_store::IndexStore;
 
 /// Fetch, persist, and return the OpenAlex references of `paper`. Idempotent:
 /// referenced papers dedupe against library entries by OpenAlex id then DOI,
-/// and citation edges dedupe on their paper-id pair.
+/// and citation edges dedupe on their paper-id pair. Returns the resolved
+/// reference papers, how many edges were newly inserted, and how many papers
+/// were newly ingested.
 pub async fn sync_references(
     store: &dyn IndexStore,
     paper: &Paper,
-) -> Result<(Vec<Paper>, usize)> {
+) -> Result<(Vec<Paper>, usize, usize)> {
     let source = ReferencesSource::new();
     let work_ids = source.reference_ids(paper).await?;
     let hydrated = source.hydrate(&work_ids).await?;
 
     let mut citations = Vec::with_capacity(hydrated.len());
+    let mut new_papers = 0usize;
     for cited in &hydrated {
         let existing = match &cited.openalex_id {
             Some(id) => store.find_paper_by_openalex_id(id)?,
@@ -29,14 +32,20 @@ pub async fn sync_references(
             Some(p) => p.id,
             None => {
                 store.insert_paper(cited)?;
+                new_papers += 1;
                 cited.id.clone()
             }
         };
+        // Self-references exist in the wild (versioned preprints citing their
+        // own journal article); storing `(a, a)` adds nothing to the graph.
+        if cited_id == paper.id {
+            continue;
+        }
         citations.push(Citation::new(paper.id.clone(), cited_id));
     }
 
     let new_edges = store.insert_citations(&citations)?;
-    Ok((hydrated, new_edges))
+    Ok((hydrated, new_edges, new_papers))
 }
 
 #[cfg(test)]
@@ -82,11 +91,14 @@ mod tests {
         paper.openalex_id = Some("W2741809807".into());
         store.insert_paper(&paper).unwrap();
 
-        let (papers, new_edges) = sync_references(&store, &paper).await.unwrap();
+        let (papers, new_edges, new_papers) = sync_references(&store, &paper).await.unwrap();
         assert!(!papers.is_empty());
         assert!(new_edges > 0);
+        assert!(new_papers > 0);
         let edges = store.citations_for_paper(&paper.id).unwrap();
-        assert_eq!(edges.len(), papers.len());
+        // Edges track resolved references; fewer when a reference resolves to
+        // the citing paper itself.
+        assert!(edges.len() <= papers.len());
         // Every cited id resolves to an ingested paper.
         for edge in &edges {
             assert!(store.get_paper(&edge.cited_paper_id).unwrap().is_some());
