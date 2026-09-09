@@ -27,7 +27,7 @@ api_key_env = "ANTHROPIC_API_KEY" # name of the env var holding the key
 
 Without `[llm]`, `gaps`/`report` return deterministic stub output.
 
-All `research` commands accept `--db <PATH>` (default `research.db` in cwd). Always `cd` into the workspace first, or pass an absolute `--db`.
+All `research` commands accept `--db <PATH>` (default `~/.research/research.db`). Pass `--db` explicitly (or set it in `~/.research/config.toml`) to use a workspace-local database.
 
 ## Core Workflow
 
