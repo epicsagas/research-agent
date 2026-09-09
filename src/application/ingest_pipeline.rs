@@ -13,12 +13,24 @@ impl<'a> IngestPipeline<'a> {
         Self { source, store }
     }
 
+    /// Fetch from the source and store papers that are new to the library.
+    /// Papers whose DOI is already stored are skipped, mirroring
+    /// `paper_import::run_import` — without this, re-running a source (a
+    /// whole-library Zotero read, a repeated arXiv query) re-inserts the same
+    /// papers as fresh rows, since each `Paper::new` carries a new id.
     pub async fn run(&self, query: &str, limit: usize) -> Result<Vec<Paper>> {
         let papers = self.source.fetch_papers(query, limit).await?;
+        let mut new_papers = Vec::with_capacity(papers.len());
         for paper in &papers {
+            if let Some(doi) = &paper.doi
+                && self.store.find_paper_by_doi(doi)?.is_some()
+            {
+                continue;
+            }
             self.store.insert_paper(paper)?;
+            new_papers.push(paper.clone());
         }
-        Ok(papers)
+        Ok(new_papers)
     }
 }
 
@@ -47,6 +59,12 @@ mod tests {
         Paper::new(title.to_string())
     }
 
+    fn paper_with_doi(title: &str, doi: &str) -> Paper {
+        let mut p = Paper::new(title.to_string());
+        p.doi = Some(doi.to_string());
+        p
+    }
+
     #[tokio::test]
     async fn ingest_stores_papers() {
         let source = FakeSource(vec![paper("attention"), paper("scaling laws")]);
@@ -58,6 +76,25 @@ mod tests {
 
         let stored = store.list_papers(None).unwrap();
         assert_eq!(stored.len(), 2);
+    }
+
+    /// Re-running a source must not duplicate papers that carry a DOI — a
+    /// whole-library Zotero re-read would otherwise re-insert everything.
+    #[tokio::test]
+    async fn ingest_skips_papers_already_stored_by_doi() {
+        let source = FakeSource(vec![
+            paper_with_doi("known paper", "10.1/known"),
+            paper("no-doi paper"),
+        ]);
+        let store = SqliteStore::open_in_memory().unwrap();
+        let pipeline = IngestPipeline::new(&source, &store);
+
+        assert_eq!(pipeline.run("q", 10).await.unwrap().len(), 2);
+
+        let second = pipeline.run("q", 10).await.unwrap();
+        assert_eq!(second.len(), 1, "only the DOI-less paper re-inserts");
+        assert_eq!(second[0].title, "no-doi paper");
+        assert_eq!(store.list_papers(None).unwrap().len(), 2);
     }
 
     #[tokio::test]

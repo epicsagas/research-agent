@@ -36,10 +36,12 @@ enum Commands {
 
     /// Ingest papers from external sources
     Ingest {
-        /// Search query (not required for --source pdf)
+        /// Search query (not required for --source pdf; empty for --source
+        /// zotero reads the whole library)
         query: Option<String>,
 
-        /// Source: arxiv, s2, openalex, europepmc, preprints, all, or pdf
+        /// Source: arxiv, s2, openalex, europepmc, preprints, all, pdf, or
+        /// zotero (needs a running Zotero with the local API enabled)
         #[arg(long, default_value = "all")]
         source: String,
 
@@ -276,6 +278,15 @@ async fn cmd_ingest(
                 }
             }
         }
+    } else if source == "zotero" {
+        // A local library is read as-is, not discovered: an empty query means
+        // the whole library, so the query stays optional here (and only here).
+        let src = research_agent::adapters::zotero_source::ZoteroSource::new();
+        let pipeline = IngestPipeline::new(&src, &store);
+        let q = query.unwrap_or_default();
+        let papers = pipeline.run(&q, limit).await?;
+        println!("Ingested {} papers from Zotero", papers.len());
+        all_papers.extend(papers);
     } else {
         let q = query
             .ok_or_else(|| anyhow::anyhow!("A search query is required for --source {source}"))?;

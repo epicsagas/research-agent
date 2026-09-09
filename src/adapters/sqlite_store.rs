@@ -41,7 +41,10 @@ fn fts_phrase_query(raw: &str) -> String {
 /// position: it is a contiguous run of the body, long enough to be unique in
 /// practice. Ellipses mark where snippet() clipped the window, so the
 /// unclipped middle is what gets matched.
-fn locate_snippet(snippet: &str, body: &str) -> Option<usize> {
+///
+/// `query_terms` is the FTS query that produced the snippet: it tells match
+/// brackets apart from literal ones the body carried all along.
+fn locate_snippet(snippet: &str, body: &str, query_terms: &str) -> Option<usize> {
     // Strip exactly the pair of ellipses snippet() adds to mark a clipped
     // window. `trim_matches` would also eat any the body text itself starts or
     // ends with; that happens to come out even today because the needle and the
@@ -60,26 +63,52 @@ fn locate_snippet(snippet: &str, body: &str) -> Option<usize> {
     if plain.is_empty() {
         return None;
     }
-    // Offset the snippet start by where the first match sits inside it, so the
-    // anchor is the matched text itself rather than the snippet's leading edge
-    // (which can begin mid-heading and truncate the section name).
-    let lead = core
-        .find('[')
-        .map(|b| core[..b].chars().filter(|c| *c != '[' && *c != ']').count());
-    let in_snippet = lead
-        .map(|chars| plain.chars().take(chars).map(char::len_utf8).sum())
+    // A `[` in the window is not necessarily snippet()'s match marker: bodies
+    // carry literal citations like "[12]" that ride along unbracketed by the
+    // matcher. A bracket span is the match only if its content appears in the
+    // query; any other bracket is body punctuation and stays put.
+    let match_at = core.match_indices('[').find_map(|(b, _)| {
+        let rest = &core[b + 1..];
+        let end = rest.find(']')?;
+        (!rest[..end].is_empty() && query_terms.contains(&rest[..end])).then_some(b)
+    });
+    // Strip the same brackets from the body so the window still matches
+    // through literal citations, and keep each kept character's offset:
+    // `plain` and the lead below are both counted in stripped coordinates.
+    let mut stripped = String::with_capacity(body.len());
+    let mut offsets = Vec::with_capacity(body.len());
+    for (i, c) in body.char_indices() {
+        if c != '[' && c != ']' {
+            stripped.push(c);
+            offsets.push(i);
+        }
+    }
+    // Offset the located window start by the characters it keeps before the
+    // match, so the anchor is the matched text itself rather than the
+    // snippet's leading edge (which can begin mid-heading and truncate the
+    // section name).
+    let lead = match_at
+        .map(|b| core[..b].chars().filter(|c| *c != '[' && *c != ']').count())
         .unwrap_or(0);
-    if let Some(pos) = body.find(plain) {
-        return Some(pos + in_snippet);
+    // Map a byte position in the stripped body back to the original body.
+    let at = |pos: usize| -> Option<usize> {
+        let chars = stripped[..pos].chars().count();
+        offsets.get(chars + lead).copied()
+    };
+    if let Some(pos) = stripped.find(plain) {
+        return at(pos);
     }
     // snippet() reproduces the body's casing, so an exact hit is the norm.
     // Fall back case-insensitively rather than silently anchoring to offset 0,
     // which would report the document's first section for a match anywhere.
-    let lower_body = body.to_lowercase();
-    let pos = lower_body.find(&plain.to_lowercase())? + in_snippet;
+    let lower_stripped = stripped.to_lowercase();
+    let pos = lower_stripped.find(&plain.to_lowercase())?;
     // Byte offsets from the lowercased copy are only valid if lowercasing did
     // not change the length; give up rather than report a wrong anchor.
-    (lower_body.len() == body.len()).then_some(pos)
+    if lower_stripped.len() != stripped.len() {
+        return None;
+    }
+    at(pos)
 }
 
 impl SqliteStore {
@@ -461,7 +490,7 @@ impl IndexStore for SqliteStore {
             // Anchoring on surrounding context instead would land on the
             // leading edge of the window and can sit *before* the very heading
             // the match falls under.
-            let anchor = locate_snippet(&snippet, &body)
+            let anchor = locate_snippet(&snippet, &body, &fts_query)
                 .map(|off| crate::domain::anchor::resolve(&body, off))
                 .unwrap_or_default();
             out.push(BodyEvidence {
@@ -1442,7 +1471,7 @@ mod tests {
     #[test]
     fn locate_snippet_points_at_the_match_not_the_window() {
         let body = "## Intro\nalpha text\n## Results\nbeta text here\n";
-        let at = locate_snippet("…## Results\nbeta [text] here…", body).unwrap();
+        let at = locate_snippet("…## Results\nbeta [text] here…", body, "\"text\"").unwrap();
         assert_eq!(&body[at..at + 4], "text");
         // That offset sits after the heading, so the section resolves whole.
         assert_eq!(
@@ -1450,8 +1479,8 @@ mod tests {
             Some("Results")
         );
 
-        assert_eq!(locate_snippet("…", body), None);
-        assert_eq!(locate_snippet("text absent from body", body), None);
+        assert_eq!(locate_snippet("…", body, "\"text\""), None);
+        assert_eq!(locate_snippet("text absent from body", body, "\"text\""), None);
     }
 
     /// A snippet window that opens with indented body text must still anchor on
@@ -1460,8 +1489,30 @@ mod tests {
     #[test]
     fn locate_snippet_anchors_through_leading_whitespace() {
         let body = "<!-- page 1 -->\n## Methods\n    we used nanodiamond probes here\n";
-        let at = locate_snippet("…    we used [nanodiamond] probes here…", body).unwrap();
+        let at = locate_snippet(
+            "…    we used [nanodiamond] probes here…",
+            body,
+            "\"nanodiamond\"",
+        )
+        .unwrap();
         assert_eq!(&body[at..at + "nanodiamond".len()], "nanodiamond");
+    }
+
+    /// A literal bracket in the body (a citation like "[12]") is not the match
+    /// marker. Two failures at once otherwise: the lead counts up to the
+    /// citation instead of the match, and stripping brackets only from the
+    /// needle makes it unfindable in a body that keeps its own brackets, so
+    /// the anchor silently falls back to the document's first section.
+    #[test]
+    fn locate_snippet_ignores_literal_citation_brackets() {
+        let body = "## Intro\nsee [12] and [34] there\n## Results\nthe [mechanism] holds\n";
+        let snippet = "…see [12] and [34] there\n## Results\nthe [mechanism] holds…";
+        let at = locate_snippet(snippet, body, "\"mechanism\"").unwrap();
+        assert_eq!(&body[at..at + "mechanism".len()], "mechanism");
+        assert_eq!(
+            crate::domain::anchor::resolve(body, at).section.as_deref(),
+            Some("Results")
+        );
     }
 
     /// Every prefix `normalize_doi` strips has to match on the stored side too.
