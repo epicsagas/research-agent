@@ -6,5 +6,6 @@ pub mod domain;
 pub mod error;
 #[cfg(feature = "mcp")]
 pub mod mcp;
+pub mod onboard;
 pub mod ports;
 pub mod store;

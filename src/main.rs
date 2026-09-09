@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use std::io::IsTerminal;
 use std::path::PathBuf;
 
 use research_agent::application::gap_analyzer::GapAnalyzer;
@@ -25,7 +26,12 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Initialize workspace
-    Init,
+    Init {
+        /// Skip the interactive onboarding (also automatic when stdin is not
+        /// a terminal)
+        #[arg(long)]
+        no_onboard: bool,
+    },
 
     /// Import papers from BibTeX/BibLaTeX (.bib) or CSL-JSON (.json) files —
     /// e.g. a Zotero export. Directory paths import every matching file.
@@ -188,7 +194,7 @@ async fn main() -> Result<()> {
     let db = resolve_db(&cli.db);
 
     match cli.command {
-        Commands::Init => cmd_init(db)?,
+        Commands::Init { no_onboard } => cmd_init(db, no_onboard)?,
         Commands::Import { paths } => cmd_import(db, paths)?,
         Commands::Ingest {
             query,
@@ -226,20 +232,48 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn cmd_init(db_path: PathBuf) -> Result<()> {
+fn cmd_init(db_path: PathBuf, no_onboard: bool) -> Result<()> {
     let config_path = default_config_path();
-    let config = Config {
-        database_path: db_path.clone(),
-        llm: None,
-        search: None,
-    };
+    // An existing config is never clobbered: onboarding offers its values as
+    // defaults, and non-interactive runs leave the file byte-for-byte alone.
+    let interactive = !no_onboard && std::io::stdin().is_terminal();
+    if !interactive {
+        if config_path.exists() {
+            let config = research_agent::config::Config::load(&config_path)?;
+            open_store(&config.database_path)?;
+            println!("Existing config kept: {}", config_path.display());
+            println!("Re-run `research init` in a terminal to reconfigure interactively.");
+        } else {
+            let config = Config {
+                database_path: db_path,
+                ..Config::default()
+            };
+            let db = config.database_path.clone();
+            config.save(&config_path)?;
+            open_store(&db)?;
+            println!("Initialized research workspace (defaults; edit the config to configure).");
+            println!("  Config: {}", config_path.display());
+            println!("  DB:     {}", db.display());
+        }
+        return Ok(());
+    }
+
+    let existing = config_path
+        .exists()
+        .then(|| research_agent::config::Config::load(&config_path))
+        .transpose()?;
+    let config = research_agent::onboard::run(db_path, existing)?;
     config.save(&config_path)?;
-    let store = open_store(&db_path)?;
+    let store = open_store(&config.database_path)?;
     drop(store);
     println!("Initialized research workspace.");
     println!("  Config: {}", config_path.display());
-    println!("  DB:     {}", db_path.display());
-    println!("Edit {} to configure [llm].", config_path.display());
+    println!("  DB:     {}", config.database_path.display());
+    if config.llm.is_none() {
+        println!(
+            "No [llm] configured — gaps/report return placeholders until set. Re-run `research init`."
+        );
+    }
     Ok(())
 }
 

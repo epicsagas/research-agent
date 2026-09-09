@@ -43,12 +43,13 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4"] }
 async-trait = "0.1"
-llm-kernel = { version = "0.31", features = ["client-async", "safety", "tokens", "search", "embedding", "embedding-fastembed", "embedding-openai", "vector-index"] }
+llm-kernel = { version = "0.31", features = ["client-async", "safety", "tokens", "search", "embedding", "embedding-fastembed", "embedding-openai", "vector-index", "discovery"] }
 reqwest = { version = "0.13", features = ["json", "query", "rustls"], default-features = false }
 quick-xml = { version = "0.42", features = ["serialize"] }
 pdf-extract = "0.12"
 biblatex = "0.12"
 dirs = "6"
+dialoguer = "0.12"
 
 # MCP stdio server (`research serve`) — exposes research-agent as MCP tools so an
 # LLM agent can drive ingestion/gaps/reports. OPTIONAL via the `mcp` feature.

@@ -140,6 +140,21 @@ irm https://github.com/epicsagas/research-agent/releases/latest/download/install
 brew install epicsagas/tap/research-agent
 ```
 
+### First-run onboarding
+
+Run `research init` in a terminal and it walks you through the settings that
+matter: database location, the LLM provider used for gap analysis and reports
+(the key itself is read from the env var you name, never stored in the file),
+and the embedding model for hybrid search, with an option to download the
+model right away. Local servers (Ollama, LM Studio) are probed for their
+loaded models so you pick from what actually exists. Re-running it is safe:
+existing values become the defaults and nothing is reset.
+
+Everything that is configurable shows up in `~/.research/config.toml`:
+options you have not set appear as commented-out lines with their defaults,
+so the file documents itself. `research init --no-onboard` skips the prompts
+(also automatic when stdin is not a terminal, so scripts are never blocked).
+
 ## Updating
 
 | Method | Command |
@@ -158,7 +173,7 @@ research --version
 
 | Command | Description |
 |---------|-------------|
-| `research init` | Initialize research workspace |
+| `research init` | Initialize research workspace (interactive onboarding in a terminal: provider, env-var key name, embedding model + download; `--no-onboard` to skip) |
 | `research ingest <query> [--source arxiv\|s2\|openalex\|europepmc\|preprints\|all]` | Ingest papers from arXiv, Semantic Scholar, OpenAlex, Europe PMC (PubMed), or preprint servers (bioRxiv, medRxiv, …) |
 | `research ingest [--source zotero] [query]` | Read papers from a running Zotero over its local API (needs "Allow other applications on this computer to communicate with Zotero" enabled); no query pulls the whole library. Not part of `--source all` — a personal library is not a discovery source |
 | `research ingest --source pdf --path <file\|dir>` | Ingest local PDF files (full body text is stored and searchable) |
