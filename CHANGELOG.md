@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Importer field recovery**: `research import` now reads abstracts and keywords/tags from BibTeX and CSL-JSON, and accepts Zotero's native JSON export (dispatched by content, since it and CSL-JSON are both `.json`). Abstracts matter most here: the field feeds gap analysis and the search index, so imported papers previously landed semantically empty next to ingested ones.
 
 ### Changed
-- Ingest dedupes by DOI: `research ingest` now skips papers whose DOI is already in the library, matching `research import`. Re-running a source (a whole-library Zotero read, a repeated arXiv query) no longer re-inserts the same papers as fresh rows. DOI-less papers still re-ingest, as before.
+- Papers without a DOI no longer duplicate on re-ingest. The duplicate check is now one shared identity function used by every ingest path (`research ingest`, `research import`, and `--source pdf`), keyed by normalized DOI first, then by the source PDF path, then by normalized title for papers that carry neither. Re-running a whole-library Zotero read or a repeated PDF directory used to insert a fresh row per DOI-less item on every run; the PDF path had no duplicate check at all. Documented trade-off: two genuinely different papers sharing one normalized title, with no DOI and no path, collapse to one row.
 - DOIs are normalized (resolver prefix stripped, lowercased) before import dedupe, so `10.1/X`, `https://doi.org/10.1/X`, and `10.1/x` resolve to one paper instead of three rows.
 
 ### Fixed

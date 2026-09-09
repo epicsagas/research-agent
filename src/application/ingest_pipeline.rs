@@ -1,3 +1,4 @@
+use crate::application::identity::is_already_stored;
 use crate::domain::paper::Paper;
 use crate::error::Result;
 use crate::ports::index_store::IndexStore;
@@ -14,17 +15,16 @@ impl<'a> IngestPipeline<'a> {
     }
 
     /// Fetch from the source and store papers that are new to the library.
-    /// Papers whose DOI is already stored are skipped, mirroring
-    /// `paper_import::run_import` — without this, re-running a source (a
-    /// whole-library Zotero read, a repeated arXiv query) re-inserts the same
-    /// papers as fresh rows, since each `Paper::new` carries a new id.
+    /// Duplicate detection lives in `identity::is_already_stored`, shared
+    /// with `paper_import::run_import` and the PDF branch — without it,
+    /// re-running a source (a whole-library Zotero read, a repeated arXiv
+    /// query) re-inserts the same papers as fresh rows, since each
+    /// `Paper::new` carries a new id.
     pub async fn run(&self, query: &str, limit: usize) -> Result<Vec<Paper>> {
         let papers = self.source.fetch_papers(query, limit).await?;
         let mut new_papers = Vec::with_capacity(papers.len());
         for paper in &papers {
-            if let Some(doi) = &paper.doi
-                && self.store.find_paper_by_doi(doi)?.is_some()
-            {
+            if is_already_stored(self.store, paper)? {
                 continue;
             }
             self.store.insert_paper(paper)?;
@@ -78,10 +78,12 @@ mod tests {
         assert_eq!(stored.len(), 2);
     }
 
-    /// Re-running a source must not duplicate papers that carry a DOI — a
-    /// whole-library Zotero re-read would otherwise re-insert everything.
+    /// Re-running a source must not duplicate anything — a whole-library
+    /// Zotero re-read would otherwise re-insert every row, and DOI-less
+    /// items (metadata fetches fail on real libraries) used to duplicate
+    /// even after the DOI check existed.
     #[tokio::test]
-    async fn ingest_skips_papers_already_stored_by_doi() {
+    async fn ingest_skips_papers_already_stored_by_doi_or_title() {
         let source = FakeSource(vec![
             paper_with_doi("known paper", "10.1/known"),
             paper("no-doi paper"),
@@ -92,8 +94,7 @@ mod tests {
         assert_eq!(pipeline.run("q", 10).await.unwrap().len(), 2);
 
         let second = pipeline.run("q", 10).await.unwrap();
-        assert_eq!(second.len(), 1, "only the DOI-less paper re-inserts");
-        assert_eq!(second[0].title, "no-doi paper");
+        assert_eq!(second.len(), 0, "the DOI-less paper is caught by title");
         assert_eq!(store.list_papers(None).unwrap().len(), 2);
     }
 
