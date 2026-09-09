@@ -133,10 +133,28 @@ struct CslItem {
     author: Vec<CslAuthor>,
 }
 
+/// A CSL-JSON date part, which the schema allows as a number or a string —
+/// Zotero's CSL export emits `[["2023"]]`, not `[[2023]]`.
+#[derive(serde::Deserialize, Clone)]
+#[serde(untagged)]
+enum CslYearPart {
+    Number(i64),
+    Text(String),
+}
+
+impl CslYearPart {
+    fn to_year(&self) -> Option<i64> {
+        match self {
+            CslYearPart::Number(n) => Some(*n),
+            CslYearPart::Text(s) => s.trim().parse().ok(),
+        }
+    }
+}
+
 #[derive(serde::Deserialize)]
 struct CslIssued {
     #[serde(default, rename = "date-parts")]
-    date_parts: Vec<Vec<Option<i64>>>,
+    date_parts: Vec<Vec<Option<CslYearPart>>>,
 }
 
 #[derive(serde::Deserialize)]
@@ -174,9 +192,10 @@ pub fn parse_csl_json(content: &str) -> Result<Vec<Paper>> {
                 .and_then(|i| {
                     i.date_parts
                         .first()
-                        .and_then(|parts| parts.first().copied())
+                        .and_then(|parts| parts.first().cloned())
                 })
                 .and_then(|y| y) // date-parts entries are optional: [[2013]]
+                .and_then(|y| y.to_year())
                 .filter(|y| *y > 0)
                 .map(|y| y as u32);
             paper.authors = item
@@ -202,7 +221,7 @@ pub fn parse_csl_json(content: &str) -> Result<Vec<Paper>> {
 /// export dialog), which is not CSL-JSON: it nests names under `creators` and
 /// calls the abstract `abstractNote`. The same item shape arrives nested under
 /// `data` in local-API responses, so `zotero_source` reuses the mapping.
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Default)]
 pub(crate) struct ZoteroItem {
     #[serde(default, rename = "itemType")]
     item_type: Option<String>,
@@ -266,10 +285,21 @@ fn year_from_date_string(date: &str) -> Option<u32> {
     None
 }
 
-/// Parse Zotero's native JSON export into papers.
+/// Parse Zotero's native JSON into papers. Desktop exports hold the item
+/// fields at the top level; local/Web-API responses nest them under `data`.
 pub fn parse_zotero_json(content: &str) -> Result<Vec<Paper>> {
-    let items: Vec<ZoteroItem> = serde_json::from_str(content)
+    let values: Vec<serde_json::Value> = serde_json::from_str(content)
         .map_err(|e| ResearchError::Source(format!("Zotero JSON parse failed: {e}")))?;
+    let items = values
+        .into_iter()
+        .map(|v| {
+            let v = match v.get("data") {
+                Some(data) => data.clone(),
+                None => v,
+            };
+            serde_json::from_value::<ZoteroItem>(v).unwrap_or_default()
+        })
+        .collect();
     Ok(papers_from_zotero_items(items))
 }
 
@@ -323,16 +353,21 @@ pub(crate) fn papers_from_zotero_items(items: Vec<ZoteroItem>) -> Vec<Paper> {
         .collect()
 }
 
-/// Pick the right JSON parser for `content`. Zotero's native export marks each
-/// item with `itemType`; CSL-JSON uses `type`. Both are `.json` on disk, so
-/// dispatching on the extension alone fails whichever one it did not pick.
+/// Pick the right JSON parser for `content`. Zotero's native JSON marks each
+/// item with `itemType` (top level in desktop exports, under `data` in API
+/// responses); CSL-JSON uses `type`. Both are `.json` on disk, so dispatching
+/// on the extension alone fails whichever one it did not pick.
 pub fn parse_json_auto(content: &str) -> Result<Vec<Paper>> {
     let looks_zotero = serde_json::from_str::<serde_json::Value>(content)
         .ok()
         .and_then(|v| {
-            v.as_array()
-                .and_then(|a| a.first())
-                .map(|first| first.get("itemType").is_some())
+            v.as_array().and_then(|a| a.first()).map(|first| {
+                first.get("itemType").is_some()
+                    || first
+                        .get("data")
+                        .and_then(|d| d.get("itemType"))
+                        .is_some()
+            })
         })
         .unwrap_or(false);
     if looks_zotero {
@@ -469,6 +504,26 @@ mod tests {
         assert_eq!(papers[0].doi.as_deref(), Some("10.1038/nature12373"));
     }
 
+    /// Zotero's CSL export writes date parts as strings, which the CSL-JSON
+    /// schema allows: `"issued": {"date-parts": [["2023"]]}`. Integer-only
+    /// deserialization rejected every real Zotero export outright.
+    #[test]
+    fn csl_accepts_zotero_string_date_parts() {
+        let csl = r#"[{
+            "type": "article-journal",
+            "title": "Attention Is All You Need",
+            "issued": {"date-parts": [["2023", "8"]]}
+        }, {
+            "type": "book",
+            "title": "Ancient text",
+            "issued": {"date-parts": [["circa 1859"]]}
+        }]"#;
+        let papers = parse_csl_json(csl).unwrap();
+        assert_eq!(papers[0].year, Some(2023));
+        // Non-numeric parts yield no year instead of failing the whole file.
+        assert_eq!(papers[1].year, None);
+    }
+
     #[test]
     fn parses_zotero_native_json() {
         let zot = r#"[{
@@ -505,6 +560,43 @@ mod tests {
         assert_eq!(parse_json_auto(zot).unwrap()[0].title, "Z");
         assert_eq!(parse_json_auto(csl).unwrap()[0].title, "C");
         assert!(parse_json_auto("not json").is_err());
+    }
+
+    /// Local/Web-API responses nest the item fields under `data`. The
+    /// flat-only parser accepted such files but silently produced zero papers
+    /// from them.
+    #[test]
+    fn zotero_api_json_with_data_wrapper_imports() {
+        let api = r#"[{
+            "key": "93929HEK",
+            "version": 50,
+            "library": {"type": "user", "id": 1, "name": "My Library"},
+            "meta": {"creatorSummary": "K. He"},
+            "data": {
+                "key": "93929HEK",
+                "itemType": "conferencePaper",
+                "title": "Deep Residual Learning for Image Recognition",
+                "abstractNote": "Deeper neural networks are more difficult.",
+                "DOI": "10.1109/CVPR.2016.90",
+                "date": "6/2016",
+                "creators": [{"firstName": "Kaiming", "lastName": "He"}],
+                "tags": [{"tag": "resnet"}]
+            }
+        }, {
+            "key": "ATTACH1",
+            "data": {"key": "ATTACH1", "itemType": "attachment", "title": "PDF"}
+        }]"#;
+        let papers = parse_zotero_json(api).unwrap();
+        assert_eq!(papers.len(), 1);
+        assert_eq!(
+            papers[0].title,
+            "Deep Residual Learning for Image Recognition"
+        );
+        assert_eq!(papers[0].year, Some(2016));
+        assert_eq!(papers[0].tags, vec!["resnet"]);
+        // Dispatch must also see `itemType` under `data`, or the file
+        // silently lands in the CSL parser and yields nothing.
+        assert_eq!(parse_json_auto(api).unwrap()[0].year, Some(2016));
     }
 
     #[test]

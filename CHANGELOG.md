@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - DOIs are normalized (resolver prefix stripped, lowercased) before import dedupe, so `10.1/X`, `https://doi.org/10.1/X`, and `10.1/x` resolve to one paper instead of three rows.
 
 ### Fixed
+- CSL-JSON import now accepts Zotero's real exports: Zotero writes `issued.date-parts` as strings (`[["2023"]]`, which the CSL-JSON schema allows) and the integer-only parser rejected every such file outright. String parts are parsed as years, and non-numeric parts yield no year instead of failing the whole file. Found by importing an actual Zotero "CSL JSON" export; the fixtures had used integer dates.
+- Zotero native-JSON import now understands API-shaped items, whose fields sit under `data` (desktop exports are flat, local/Web-API responses are not). Such files previously reported "0 imported, 0 failed" — accepted by both parsers, producing zero papers from each. The `.json` dispatch also recognizes `itemType` under `data`, without which the file silently landed in the CSL parser.
 - Body-evidence anchors no longer mistake a literal bracket in the page text (a citation like `[12]`) for snippet()'s match marker. Picking the citation as the match reported a section or page before the one the match fell under, and because brackets were stripped from the located needle but not the body, the window could fail to locate at all and fall back to the document's first section. Match brackets are now identified by matching the query, and brackets are stripped from both sides before locating.
 
 ## [0.1.0] - 2026-09-08
