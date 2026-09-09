@@ -253,10 +253,11 @@ fn cmd_init(db_path: PathBuf, no_onboard: bool) -> Result<()> {
             println!("Existing config kept: {}", config_path.display());
             println!("Re-run `research init` in a terminal to reconfigure interactively.");
         } else {
-            let config = Config {
+            let mut config = Config {
                 database_path: db_path,
                 ..Config::default()
             };
+            record_hardware_caps(&mut config);
             let db = config.database_path.clone();
             config.save(&config_path)?;
             open_store(&db)?;
@@ -271,7 +272,13 @@ fn cmd_init(db_path: PathBuf, no_onboard: bool) -> Result<()> {
         .exists()
         .then(|| research_agent::config::Config::load(&config_path))
         .transpose()?;
-    let config = research_agent::onboard::run(db_path, existing)?;
+    let fresh_config = existing.is_none();
+    let mut config = research_agent::onboard::run(db_path, existing)?;
+    // Hardware caps are only written for a fresh config — an existing one is
+    // never clobbered, including its recorded batch size.
+    if fresh_config {
+        record_hardware_caps(&mut config);
+    }
     config.save(&config_path)?;
     let store = open_store(&config.database_path)?;
     drop(store);
@@ -284,6 +291,15 @@ fn cmd_init(db_path: PathBuf, no_onboard: bool) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// Record hardware-derived embedding caps (batch size, memory budget) into
+/// the config's `[search]` section, creating it when absent.
+fn record_hardware_caps(config: &mut Config) {
+    let probed = research_agent::config::SearchConfig::probed();
+    let search = config.search.get_or_insert_with(Default::default);
+    search.embed_batch_size = probed.embed_batch_size;
+    search.embed_memory_budget_mb = probed.embed_memory_budget_mb;
 }
 
 async fn cmd_ingest(

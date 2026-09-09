@@ -31,6 +31,66 @@ pub struct SearchConfig {
     /// Env var holding the OpenAI key when provider = "openai".
     #[serde(default = "search_key_env_default")]
     pub openai_api_key_env: String,
+    /// Papers per embedding call. Clamped to 8..=32 at runtime; `init`
+    /// records a core-count-based value here.
+    #[serde(default = "search_batch_default")]
+    pub embed_batch_size: usize,
+    /// Advisory embedding memory budget in MB (min(2 GB, 25% of RAM)),
+    /// recorded by `init`. Not consumed at runtime yet — sequential batched
+    /// embedding already bounds the arena — but it is the budget to honor
+    /// once concurrent embedding lands.
+    #[serde(default = "search_memory_budget_default")]
+    pub embed_memory_budget_mb: u32,
+}
+
+fn search_batch_default() -> usize {
+    16
+}
+
+fn search_memory_budget_default() -> u32 {
+    1024
+}
+
+impl SearchConfig {
+    /// Probe the machine (core count, total RAM) and return the embedding
+    /// caps `init` records into config: batch clamped from cores, memory
+    /// budget min(2 GB, 25% of RAM).
+    pub fn probed() -> Self {
+        let cores = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4);
+        Self {
+            embed_batch_size: (cores * 2).clamp(8, 32),
+            embed_memory_budget_mb: match total_ram_mb() {
+                Some(mb) => (mb / 4).clamp(256, 2048) as u32,
+                None => search_memory_budget_default(),
+            },
+            ..Self::default()
+        }
+    }
+}
+
+fn total_ram_mb() -> Option<u64> {
+    #[cfg(target_os = "macos")]
+    {
+        let out = std::process::Command::new("sysctl")
+            .args(["-n", "hw.memsize"])
+            .output()
+            .ok()?;
+        let bytes: u64 = std::str::from_utf8(&out.stdout).ok()?.trim().parse().ok()?;
+        Some(bytes / (1024 * 1024))
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let raw = std::fs::read_to_string("/proc/meminfo").ok()?;
+        let line = raw.lines().find(|l| l.starts_with("MemTotal"))?;
+        let kb: u64 = line.split_whitespace().nth(1)?.parse().ok()?;
+        Some(kb / 1024)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        None
+    }
 }
 
 fn search_provider_default() -> String {
