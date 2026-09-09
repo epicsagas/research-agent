@@ -48,7 +48,10 @@ impl LlmResearchEngine {
     /// When the topic has no linked papers, returns a clearly-marked placeholder
     /// so the LLM never receives arbitrary papers from unrelated topics.
     fn gap_context_for_topic(&self, topic_id: &str) -> Result<String> {
-        let papers = self.store.list_papers_by_topic(topic_id, Some(20))?;
+        // No count limit: the store already orders linked papers by relevance
+        // DESC, so the token cap below — not an arbitrary count — decides how
+        // much context the LLM sees.
+        let papers = self.store.list_papers_by_topic(topic_id, None)?;
         if papers.is_empty() {
             return Ok("(no papers indexed for this topic yet)".into());
         }
@@ -68,16 +71,63 @@ impl LlmResearchEngine {
     /// linked to the topic; a placeholder is emitted when none are linked, so
     /// the report never describes arbitrary papers as belonging to the topic.
     fn report_context_for_topic(&self, topic_id: &str) -> Result<String> {
-        let papers = self.store.list_papers_by_topic(topic_id, Some(5))?;
+        // No count limit: papers arrive relevance-ordered and the token
+        // budget below decides how many fit — a fixed count silently drops
+        // linked papers (and with equal scores, arbitrary ones).
+        let papers = self.store.list_papers_by_topic(topic_id, None)?;
         if papers.is_empty() {
             return Ok("  (no papers indexed for this topic yet)\n".into());
         }
         let mut out = String::new();
-        for paper in &papers {
-            out.push_str(&format!("- {}: {}\n", paper.title, paper.abstract_text));
+        let mut budget = REPORT_CONTEXT_TOKENS;
+        for (i, paper) in papers.iter().enumerate() {
+            let line = format!("- {}: {}\n", paper.title, paper.abstract_text);
+            let cost = estimate_tokens(&line);
+            // Papers arrive relevance-ordered; the first one that no longer
+            // fits ends the block (the first paper is always included).
+            if i > 0 && cost > budget {
+                break;
+            }
+            budget = budget.saturating_sub(cost);
+            out.push_str(&line);
         }
         Ok(out)
     }
+}
+
+/// Token budget for report context: include as many linked papers (highest
+/// relevance first) as fit instead of a fixed count.
+const REPORT_CONTEXT_TOKENS: usize = 4000;
+
+/// Parse `GAP_TYPE|description` lines out of an LLM response. A non-empty
+/// response yielding zero parseable lines means the model ignored the format
+/// (common with free/OpenRouter models) — that is an error, not an empty gap
+/// list; returning `Ok(vec![])` surfaces downstream as a misleading
+/// "No gaps found".
+fn parse_gaps(text: &str, topic_id: &str) -> Result<Vec<KnowledgeGap>> {
+    let gaps: Vec<KnowledgeGap> = text
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.splitn(2, '|');
+            let gap_type = match parts.next()?.trim() {
+                "MissingLiterature" => GapType::MissingLiterature,
+                "UnansweredQuestion" => GapType::UnansweredQuestion,
+                "MethodologyGap" => GapType::MethodologyGap,
+                "ConnectionGap" => GapType::ConnectionGap,
+                _ => return None,
+            };
+            let desc = parts.next()?.trim().to_string();
+            Some(KnowledgeGap::new(desc, topic_id.to_string(), gap_type))
+        })
+        .collect();
+    if gaps.is_empty() && !text.trim().is_empty() {
+        return Err(ResearchError::Source(format!(
+            "gap analysis response matched no 'GAP_TYPE|description' lines; \
+             model ignored the format. Response start: {:?}",
+            text.chars().take(300).collect::<String>()
+        )));
+    }
+    Ok(gaps)
 }
 
 #[async_trait]
@@ -127,23 +177,7 @@ impl ResearchEngine for LlmResearchEngine {
 
         let text = sanitize_output(&response.content);
 
-        let gaps = text
-            .lines()
-            .filter_map(|line| {
-                let mut parts = line.splitn(2, '|');
-                let gap_type = match parts.next()?.trim() {
-                    "MissingLiterature" => GapType::MissingLiterature,
-                    "UnansweredQuestion" => GapType::UnansweredQuestion,
-                    "MethodologyGap" => GapType::MethodologyGap,
-                    "ConnectionGap" => GapType::ConnectionGap,
-                    _ => return None,
-                };
-                let desc = parts.next()?.trim().to_string();
-                Some(KnowledgeGap::new(desc, topic_id.to_string(), gap_type))
-            })
-            .collect();
-
-        Ok(gaps)
+        parse_gaps(&text, topic_id)
     }
 
     async fn generate_report(&self, title: &str, topic_ids: &[String]) -> Result<ResearchReport> {
@@ -396,5 +430,69 @@ mod tests {
         assert!(!block.contains(&title_a));
         assert!(!block.contains(&title_b));
         assert!(!block.contains(&title_unlinked));
+    }
+
+    #[test]
+    fn parse_gaps_reads_valid_lines() {
+        let gaps = parse_gaps(
+            "MissingLiterature|no survey of X\nUnansweredQuestion| does Y hold? \n",
+            "topic-1",
+        )
+        .unwrap();
+        assert_eq!(gaps.len(), 2);
+        assert_eq!(gaps[0].description, "no survey of X");
+        assert_eq!(gaps[1].topic_id, "topic-1");
+    }
+
+    #[test]
+    fn parse_gaps_empty_response_is_ok_empty() {
+        assert!(parse_gaps("", "t").unwrap().is_empty());
+        assert!(parse_gaps("  \n ", "t").unwrap().is_empty());
+    }
+
+    #[test]
+    fn parse_gaps_errors_on_unparseable_response() {
+        // Regression: a prose answer that matches zero `GAP_TYPE|description`
+        // lines used to become an empty vec, printed as "No gaps found".
+        let err = parse_gaps(
+            "Here are some gaps:\n1. Nobody has studied X\n2. Y is unclear",
+            "t",
+        );
+        assert!(
+            err.is_err(),
+            "prose response must be an error, not empty ok"
+        );
+    }
+
+    #[test]
+    fn report_context_includes_all_linked_papers_within_budget() {
+        // Regression: the report context capped linked papers at a fixed 5,
+        // silently dropping the rest — with equal relevance scores the
+        // dropped ones were whichever the store sorted last.
+        let store = SqliteStore::open_in_memory().unwrap();
+        let topic = ResearchTopic::new("Many papers".into());
+        let topic_id = topic.id.clone();
+        store.insert_topic(&topic).unwrap();
+
+        let titles: Vec<String> = (0..7)
+            .map(|i| {
+                let mut paper = Paper::new(format!("Paper number {i}"));
+                paper.abstract_text = "short abstract".into();
+                store.insert_paper(&paper).unwrap();
+                store
+                    .link_paper_to_topic(&paper.id, &topic_id, 0.5)
+                    .unwrap();
+                paper.title
+            })
+            .collect();
+
+        let engine = LlmResearchEngine::new(Box::new(store));
+        let block = engine.report_context_for_topic(&topic_id).unwrap();
+        for title in &titles {
+            assert!(
+                block.contains(title.as_str()),
+                "linked paper '{title}' missing from report context, got: {block}"
+            );
+        }
     }
 }
