@@ -363,10 +363,7 @@ pub fn parse_json_auto(content: &str) -> Result<Vec<Paper>> {
         .and_then(|v| {
             v.as_array().and_then(|a| a.first()).map(|first| {
                 first.get("itemType").is_some()
-                    || first
-                        .get("data")
-                        .and_then(|d| d.get("itemType"))
-                        .is_some()
+                    || first.get("data").and_then(|d| d.get("itemType")).is_some()
             })
         })
         .unwrap_or(false);

@@ -5,6 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::adapters::bib_importer::{parse_bibtex, parse_json_auto};
+use crate::application::identity::is_already_stored;
 use crate::domain::paper::Paper;
 use crate::error::{ResearchError, Result};
 use crate::ports::index_store::IndexStore;
@@ -58,9 +59,7 @@ pub fn run_import(store: &dyn IndexStore, path: &Path) -> Result<ImportSummary> 
             }
         };
         for paper in papers {
-            if let Some(doi) = &paper.doi
-                && store.find_paper_by_doi(doi)?.is_some()
-            {
+            if is_already_stored(store, &paper)? {
                 summary.skipped_duplicates += 1;
                 continue;
             }
@@ -123,14 +122,15 @@ mod tests {
         assert_eq!(summary.skipped_duplicates, 0);
         assert!(summary.failed.is_empty());
 
-        // Second run: every entry with a DOI is a duplicate now.
+        // Second run: every entry is a duplicate now — by DOI, and the
+        // DOI-less one by title.
         let summary = run_import(&store, dir.path()).unwrap();
         assert_eq!(
             summary.imported.len(),
-            1,
-            "only the DOI-less paper re-imports"
+            0,
+            "the DOI-less paper is caught by its title"
         );
-        assert_eq!(summary.skipped_duplicates, 1);
+        assert_eq!(summary.skipped_duplicates, 2);
     }
 
     #[test]

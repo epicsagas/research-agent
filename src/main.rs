@@ -265,6 +265,11 @@ async fn cmd_ingest(
             for p in &paths {
                 match src.ingest_file(p) {
                     Ok((paper, body)) => {
+                        if research_agent::application::identity::is_already_stored(&store, &paper)?
+                        {
+                            println!("Already ingested, skipped: {}", paper.title);
+                            continue;
+                        }
                         store.insert_paper(&paper)?;
                         if let Some(body) = body {
                             store.set_paper_body(&paper.id, &body)?;

@@ -17,6 +17,14 @@ pub trait IndexStore: Send + Sync {
     /// Look up a paper by its OpenAlex work id (`W…`). Used by the reference
     /// graph to dedupe hydrated referenced papers on re-runs.
     fn find_paper_by_openalex_id(&self, openalex_id: &str) -> Result<Option<Paper>>;
+    /// Look up a paper by its stored source PDF path. Second identity key:
+    /// the same file re-ingested must not become a second row.
+    fn find_paper_by_pdf_path(&self, path: &str) -> Result<Option<Paper>>;
+    /// Look up a paper by title, compared in normalized form
+    /// ([`crate::domain::paper::normalize_title`]). Last identity key, for
+    /// papers carrying neither a DOI nor a pdf_path. `title` must already be
+    /// normalized.
+    fn find_paper_by_title(&self, title: &str) -> Result<Option<Paper>>;
     /// Store (or replace) the extracted full body text of a paper. Kept out of
     /// the `Paper` domain type so MCP/tool responses never carry megabytes of
     /// body text.

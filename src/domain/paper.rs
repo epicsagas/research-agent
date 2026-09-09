@@ -155,6 +155,28 @@ impl Paper {
     }
 }
 
+/// Normalize a title into the form used for identity matching: punctuation
+/// dropped (letters and digits kept, so hyphenated words and CJK titles
+/// survive), lowercased, whitespace runs collapsed to one space. Dropping
+/// punctuation catches the same paper exported with a trailing period by one
+/// source and not the other. This is the fallback key for papers that carry
+/// neither a DOI nor a pdf_path, so the stored side must be compared through
+/// the same function (the store cannot express this collapse in SQL, which
+/// is why the lookup scans and compares here). Two genuinely different
+/// papers sharing one normalized title collapse to one row — accepted for a
+/// personal library.
+pub fn normalize_title(title: &str) -> String {
+    let stripped: String = title
+        .chars()
+        .filter(|c| c.is_alphanumeric() || c.is_whitespace())
+        .collect();
+    stripped
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

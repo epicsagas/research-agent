@@ -279,6 +279,38 @@ impl IndexStore for SqliteStore {
         }
     }
 
+    fn find_paper_by_pdf_path(&self, path: &str) -> Result<Option<Paper>> {
+        let conn = self.conn.lock().map_err(|e| {
+            ResearchError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let mut stmt = conn.prepare("SELECT * FROM papers WHERE pdf_path = ?1 LIMIT 1")?;
+        let mut rows = stmt.query(params![path])?;
+        match rows.next()? {
+            Some(row) => Ok(Some(Self::paper_from_row(row)?)),
+            None => Ok(None),
+        }
+    }
+
+    fn find_paper_by_title(&self, title: &str) -> Result<Option<Paper>> {
+        let conn = self.conn.lock().map_err(|e| {
+            ResearchError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        // The whitespace collapse in `normalize_title` has no SQL equivalent,
+        // so the stored side is compared in Rust. Libraries are personal-scale
+        // (hundreds of rows), which keeps the full scan affordable.
+        // ponytail: full scan per lookup; add a normalized-title column if a
+        // library grows past ~10k papers.
+        let mut stmt = conn.prepare("SELECT * FROM papers WHERE title IS NOT NULL")?;
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            let stored: String = row.get("title")?;
+            if crate::domain::paper::normalize_title(&stored) == title {
+                return Ok(Some(Self::paper_from_row(row)?));
+            }
+        }
+        Ok(None)
+    }
+
     fn set_paper_body(&self, paper_id: &str, body: &str) -> Result<()> {
         let conn = self.conn.lock().map_err(|e| {
             ResearchError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
@@ -1480,7 +1512,10 @@ mod tests {
         );
 
         assert_eq!(locate_snippet("…", body, "\"text\""), None);
-        assert_eq!(locate_snippet("text absent from body", body, "\"text\""), None);
+        assert_eq!(
+            locate_snippet("text absent from body", body, "\"text\""),
+            None
+        );
     }
 
     /// A snippet window that opens with indented body text must still anchor on
