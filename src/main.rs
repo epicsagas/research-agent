@@ -379,6 +379,15 @@ async fn cmd_ingest(
         println!("Linked {} papers to topic {topic_id}", all_papers.len());
     }
 
+    if !all_papers.is_empty() {
+        // Embed now so the next query doesn't pay for it. Best-effort by the
+        // hybrid contract: failure here just means the next query falls back
+        // to lexical search and syncs then.
+        if open_hybrid(&store, &db).is_none() {
+            eprintln!("Warning: embedding index unavailable — queries fall back to lexical search");
+        }
+    }
+
     println!("Total: {} papers ingested", all_papers.len());
     Ok(())
 }

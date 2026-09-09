@@ -49,6 +49,8 @@ impl Default for SearchConfig {
             provider: search_provider_default(),
             model: search_model_default(),
             openai_api_key_env: search_key_env_default(),
+            embed_batch_size: search_batch_default(),
+            embed_memory_budget_mb: search_memory_budget_default(),
         }
     }
 }
@@ -173,6 +175,13 @@ pub fn config_template(cfg: &Config) -> String {
                 "openai_api_key_env = {}\n",
                 toml_str(&search.openai_api_key_env)
             ));
+            out.push_str("# papers per embedding call (clamped to 8..=32; init records a core-count-based value)\n");
+            out.push_str(&format!("embed_batch_size = {}\n", search.embed_batch_size));
+            out.push_str("# advisory embedding memory budget in MB (min(2 GB, 25% of RAM))\n");
+            out.push_str(&format!(
+                "embed_memory_budget_mb = {}\n",
+                search.embed_memory_budget_mb
+            ));
         }
         None => {
             for line in [
@@ -180,6 +189,8 @@ pub fn config_template(cfg: &Config) -> String {
                 "# provider = \"local\"  # \"local\" (bundled ONNX) or \"openai\" (BYOK remote embeddings)",
                 "# model = \"BGESmallENV15\"  # local model id (llm-kernel EmbeddingModel)",
                 "# openai_api_key_env = \"OPENAI_API_KEY\"  # env var holding the OpenAI key when provider = \"openai\"",
+                "# embed_batch_size = 16  # papers per embedding call (clamped to 8..=32)",
+                "# embed_memory_budget_mb = 1024  # advisory embedding memory budget in MB",
             ] {
                 out.push_str(line);
                 out.push('\n');
