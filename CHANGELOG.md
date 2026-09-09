@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Ingest dedupes by DOI: `research ingest` now skips papers whose DOI is already in the library, matching `research import`. Re-running a source (a whole-library Zotero read, a repeated arXiv query) no longer re-inserts the same papers as fresh rows. DOI-less papers still re-ingest, as before.
 - DOIs are normalized (resolver prefix stripped, lowercased) before import dedupe, so `10.1/X`, `https://doi.org/10.1/X`, and `10.1/x` resolve to one paper instead of three rows.
 
+### Fixed
+- Body-evidence anchors no longer mistake a literal bracket in the page text (a citation like `[12]`) for snippet()'s match marker. Picking the citation as the match reported a section or page before the one the match fell under, and because brackets were stripped from the located needle but not the body, the window could fail to locate at all and fall back to the document's first section. Match brackets are now identified by matching the query, and brackets are stripped from both sides before locating.
+
 ## [0.1.0] - 2026-09-08
 
 ### Added
