@@ -188,8 +188,17 @@ fn init_tracing() {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
     init_tracing();
+    if let Err(e) = run().await {
+        // Display, not the `Termination` Debug path: anyhow's Debug prints a
+        // captured backtrace (ONNX/ort symbols) at the user's terminal.
+        eprintln!("Error: {e:#}");
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> Result<()> {
     let cli = Cli::parse();
     let db = resolve_db(&cli.db);
 
