@@ -42,6 +42,9 @@ pub struct ImportPapersParams {
 pub struct PaperBodyParams {
     /// Paper id.
     pub id: String,
+    /// When set, return matching snippets with their section and page instead
+    /// of the truncated whole body.
+    pub query: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
