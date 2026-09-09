@@ -34,7 +34,7 @@ The same binary also works as a standalone CLI for terminals and scripts.
 | 🤖 | MCP server | 16 tools your agent drives directly over stdio — no API key needed |
 | 🧠 | Agent-native analysis | Gap analysis and reports run inside your agent: tools hand over structured state, the agent reasons, results are persisted |
 | 🔗 | Citation graph | Paper-to-paper reference edges from OpenAlex, forward and reverse, optionally labeled with Semantic Scholar citation intents |
-| 📚 | Paper indexing | arXiv, Semantic Scholar, OpenAlex, Europe PMC (PubMed), bioRxiv-style preprints, and local PDF support |
+| 📚 | Paper indexing | arXiv, Semantic Scholar, OpenAlex, Europe PMC (PubMed), bioRxiv-style preprints, local PDFs, and Zotero (a running instance or its export files) |
 | 🔍 | Hybrid search | FTS5 lexical + local-ONNX semantic hits, RRF-fused — works offline |
 | 📂 | Topic trees | Organize research hierarchically with sub-topics |
 | 📖 | Reading tracker | Queue, track, and rate what you've read |
@@ -86,7 +86,7 @@ auto-install hook does not apply to hermes. If skills_guard blocks the
 install scan, set `plugins.scan_on_install: false` in the hermes config.
 
 The plugin auto-installs the `research` binary on session start and exposes
-15 MCP tools, so the agent can ingest, search, analyze with its own model, and file reports on its own.
+16 MCP tools, so the agent can ingest, search, analyze with its own model, and file reports on its own.
 
 Once installed, ask your agent things like:
 
@@ -160,8 +160,9 @@ research --version
 |---------|-------------|
 | `research init` | Initialize research workspace |
 | `research ingest <query> [--source arxiv\|s2\|openalex\|europepmc\|preprints\|all]` | Ingest papers from arXiv, Semantic Scholar, OpenAlex, Europe PMC (PubMed), or preprint servers (bioRxiv, medRxiv, …) |
+| `research ingest [--source zotero] [query]` | Read papers from a running Zotero over its local API (needs "Allow other applications on this computer to communicate with Zotero" enabled); no query pulls the whole library. Not part of `--source all` — a personal library is not a discovery source |
 | `research ingest --source pdf --path <file\|dir>` | Ingest local PDF files (full body text is stored and searchable) |
-| `research import <file\|dir>` | Import BibTeX/BibLaTeX, CSL-JSON, or Zotero-native JSON files (e.g. a Zotero export) |
+| `research import <file\|dir>` | Import BibTeX/BibLaTeX, CSL-JSON, or Zotero JSON files (desktop export or API shape), with abstracts, tags, and normalized DOIs; re-imports skip papers already in the library |
 | `research index [--rebuild]` | Build or rebuild search index (FTS + vector index) |
 | `research reingest [--missing-pages]` | Re-extract stored PDF bodies (adds page markers to bodies ingested before they existed) |
 | `research query <q> [--evidence]` | Search papers — hybrid lexical+semantic when embeddings are available; `--evidence` also shows the matching body text with its section and page |
