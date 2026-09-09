@@ -317,8 +317,10 @@ mod tests {
 
     #[test]
     fn template_quotes_paths_safely() {
-        let mut config = Config::default();
-        config.database_path = PathBuf::from("/home/u/space dir/r.db");
+        let config = Config {
+            database_path: PathBuf::from("/home/u/space dir/r.db"),
+            ..Config::default()
+        };
         let text = config_template(&config);
         let parsed: Config = toml::from_str(&text).unwrap();
         assert_eq!(
