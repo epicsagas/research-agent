@@ -290,16 +290,31 @@ fn year_from_date_string(date: &str) -> Option<u32> {
 pub fn parse_zotero_json(content: &str) -> Result<Vec<Paper>> {
     let values: Vec<serde_json::Value> = serde_json::from_str(content)
         .map_err(|e| ResearchError::Source(format!("Zotero JSON parse failed: {e}")))?;
+    // A type-mismatched item (e.g. `title` holding a number) must not turn
+    // into an empty default item and vanish: report the failure instead of
+    // silently importing fewer papers than the file contains.
+    let mut failed = 0usize;
     let items = values
         .into_iter()
-        .map(|v| {
+        .filter_map(|v| {
             let v = match v.get("data") {
                 Some(data) => data.clone(),
                 None => v,
             };
-            serde_json::from_value::<ZoteroItem>(v).unwrap_or_default()
+            match serde_json::from_value::<ZoteroItem>(v) {
+                Ok(item) => Some(item),
+                Err(_) => {
+                    failed += 1;
+                    None
+                }
+            }
         })
-        .collect();
+        .collect::<Vec<_>>();
+    if failed > 0 {
+        return Err(ResearchError::Source(format!(
+            "Zotero JSON: {failed} item(s) failed to parse"
+        )));
+    }
     Ok(papers_from_zotero_items(items))
 }
 
@@ -594,6 +609,18 @@ mod tests {
         // Dispatch must also see `itemType` under `data`, or the file
         // silently lands in the CSL parser and yields nothing.
         assert_eq!(parse_json_auto(api).unwrap()[0].year, Some(2016));
+    }
+
+    /// A type-mismatched item used to become an empty default item and be
+    /// dropped with no signal, silently shrinking the import.
+    #[test]
+    fn malformed_zotero_item_fails_loudly() {
+        let zot = r#"[
+            {"itemType": "journalArticle", "title": "Good"},
+            {"itemType": "journalArticle", "title": 42}
+        ]"#;
+        let err = parse_zotero_json(zot).unwrap_err();
+        assert!(err.to_string().contains("1 item(s) failed"));
     }
 
     #[test]
