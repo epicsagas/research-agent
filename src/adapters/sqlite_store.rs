@@ -42,9 +42,21 @@ fn fts_phrase_query(raw: &str) -> String {
 /// practice. Ellipses mark where snippet() clipped the window, so the
 /// unclipped middle is what gets matched.
 fn locate_snippet(snippet: &str, body: &str) -> Option<usize> {
-    let core = snippet.trim_matches('…');
+    // Strip exactly the pair of ellipses snippet() adds to mark a clipped
+    // window. `trim_matches` would also eat any the body text itself starts or
+    // ends with; that happens to come out even today because the needle and the
+    // lead shrink together, but the compensation is incidental and stating the
+    // intent directly costs nothing.
+    let core = snippet.strip_prefix('…').unwrap_or(snippet);
+    let core = core.strip_suffix('…').unwrap_or(core);
+    // Trim before measuring, not after. `lead` and the text located in the body
+    // must be counted against the *same* string: measuring the lead against an
+    // untrimmed window while searching for its trimmed text shifts the anchor
+    // right by every character the trim removed, and PDF bodies routinely keep
+    // indentation on wrapped lines.
+    let core = core.trim();
     let plain: String = core.chars().filter(|c| *c != '[' && *c != ']').collect();
-    let plain = plain.trim();
+    let plain = plain.as_str();
     if plain.is_empty() {
         return None;
     }
@@ -202,19 +214,28 @@ impl IndexStore for SqliteStore {
         let Some(needle) = needle else {
             return Ok(None);
         };
+        // Normalize the stored side with the same function, not a parallel SQL
+        // `replace()` chain: the chain silently covered fewer prefixes than
+        // `normalize_doi`, so `doi:` and `http://doi.org/` rows never matched.
+        // `doi:` cannot be expressed as a `replace()` anyway without corrupting
+        // a DOI that contains the substring. Prefiltering on a suffix match
+        // keeps SQLite from handing back the whole table.
         let mut stmt = conn.prepare(
-            "SELECT * FROM papers WHERE lower(
-                 replace(replace(replace(trim(doi),
-                     'https://doi.org/', ''),
-                     'http://dx.doi.org/', ''),
-                     'https://dx.doi.org/', '')
-             ) = ?1 LIMIT 1",
+            "SELECT * FROM papers
+             WHERE doi IS NOT NULL AND lower(trim(doi)) LIKE '%' || ?1",
         )?;
         let mut rows = stmt.query(params![needle])?;
-        match rows.next()? {
-            Some(row) => Ok(Some(Self::paper_from_row(row)?)),
-            None => Ok(None),
+        while let Some(row) = rows.next()? {
+            let stored: Option<String> = row.get("doi")?;
+            let matches = stored
+                .as_deref()
+                .and_then(crate::adapters::bib_importer::normalize_doi)
+                .is_some_and(|stored| stored == needle);
+            if matches {
+                return Ok(Some(Self::paper_from_row(row)?));
+            }
         }
+        Ok(None)
     }
 
     fn find_paper_by_openalex_id(&self, openalex_id: &str) -> Result<Option<Paper>> {
@@ -422,6 +443,7 @@ impl IndexStore for SqliteStore {
              JOIN bodies_fts fts ON fts.rowid = pb.rowid
              WHERE bodies_fts MATCH ?1
                AND (?2 IS NULL OR p.id = ?2)
+             ORDER BY rank
              LIMIT ?3",
         )?;
         let rows = stmt.query_map(params![fts_query, paper_id, limit as i64], |row| {
@@ -1432,6 +1454,43 @@ mod tests {
         assert_eq!(locate_snippet("text absent from body", body), None);
     }
 
+    /// A snippet window that opens with indented body text must still anchor on
+    /// the matched term. PDF bodies keep indentation on wrapped lines, so a
+    /// leading-whitespace window is routine rather than exotic.
+    #[test]
+    fn locate_snippet_anchors_through_leading_whitespace() {
+        let body = "<!-- page 1 -->\n## Methods\n    we used nanodiamond probes here\n";
+        let at = locate_snippet("…    we used [nanodiamond] probes here…", body).unwrap();
+        assert_eq!(&body[at..at + "nanodiamond".len()], "nanodiamond");
+    }
+
+    /// Every prefix `normalize_doi` strips has to match on the stored side too.
+    /// Normalizing only the incoming DOI lets the un-stripped forms sit in the
+    /// table as permanent duplicates.
+    #[test]
+    fn find_paper_by_doi_matches_every_normalized_prefix() {
+        for stored in [
+            "https://doi.org/10.1038/nature12373",
+            "http://doi.org/10.1038/nature12373",
+            "http://dx.doi.org/10.1038/nature12373",
+            "https://dx.doi.org/10.1038/nature12373",
+            "doi:10.1038/nature12373",
+            "10.1038/NATURE12373",
+        ] {
+            let store = test_store();
+            let mut paper = Paper::new("stored form".to_string());
+            paper.doi = Some(stored.to_string());
+            store.insert_paper(&paper).unwrap();
+            assert!(
+                store
+                    .find_paper_by_doi("10.1038/nature12373")
+                    .unwrap()
+                    .is_some(),
+                "stored form {stored} did not match a normalized probe"
+            );
+        }
+    }
+
     /// Scoping to one paper must happen in the query. Filtering a whole-library
     /// result set afterwards loses the target paper's matches whenever other
     /// papers fill the limit first.
@@ -1463,6 +1522,39 @@ mod tests {
         // Unscoped still searches everything.
         let all = store.search_body_evidence("keyword", None, 20).unwrap();
         assert_eq!(all.len(), 11);
+    }
+
+    /// A limit smaller than the match count must keep the *best* matches, not
+    /// whichever rows SQLite happened to emit first. Without `ORDER BY rank`
+    /// the survivors are unspecified row order and the strongest evidence can
+    /// be dropped silently.
+    #[test]
+    fn body_evidence_returns_the_best_matches_under_a_limit() {
+        let store = test_store();
+        // Weak matches are inserted first so unordered row order would favour
+        // them; the dense match is inserted last.
+        for i in 0..8 {
+            let weak = Paper::new(format!("weak {i}"));
+            store.insert_paper(&weak).unwrap();
+            store
+                .set_paper_body(&weak.id, "## Intro\nphotonic mentioned once here")
+                .unwrap();
+        }
+        let strong = Paper::new("strong".into());
+        store.insert_paper(&strong).unwrap();
+        store
+            .set_paper_body(
+                &strong.id,
+                "## Methods\nphotonic photonic photonic photonic photonic lattice",
+            )
+            .unwrap();
+
+        let top = store.search_body_evidence("photonic", None, 1).unwrap();
+        assert_eq!(top.len(), 1);
+        assert_eq!(
+            top[0].paper_id, strong.id,
+            "limit kept an arbitrary row instead of the best-ranked match"
+        );
     }
 
     /// The exact scenario an audit reproduced: a term that also occurs inside
