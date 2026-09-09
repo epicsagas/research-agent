@@ -34,6 +34,30 @@ impl<'a> IngestPipeline<'a> {
     }
 }
 
+/// Ingest from several sources, tolerating per-source failure. One source
+/// erroring (Semantic Scholar rate-limiting with HTTP 429, a network hiccup)
+/// must not abort the run: papers already ingested from other sources still
+/// need to reach the caller's topic-linking step. A failing source is
+/// reported on stderr and the remaining sources continue.
+pub async fn run_sources(
+    sources: &[&dyn PaperSource],
+    store: &dyn IndexStore,
+    query: &str,
+    limit: usize,
+) -> Vec<Paper> {
+    let mut all = Vec::new();
+    for src in sources {
+        match IngestPipeline::new(*src, store).run(query, limit).await {
+            Ok(papers) => {
+                println!("Ingested {} papers from {}", papers.len(), src.name());
+                all.extend(papers);
+            }
+            Err(e) => eprintln!("Warning: {} ingest failed, skipping: {e}", src.name()),
+        }
+    }
+    all
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,6 +130,36 @@ mod tests {
 
         assert_eq!(pipeline.run("q", 2).await.unwrap().len(), 2);
         assert_eq!(store.list_papers(None).unwrap().len(), 2);
+    }
+
+    /// Regression: `--source all` used to abort on the first failing source
+    /// (e.g. Semantic Scholar 429), so papers already ingested from arXiv
+    /// never reached topic linking. A failed source is skipped; the rest run.
+    #[tokio::test]
+    async fn run_sources_survives_partial_failure() {
+        struct FailingSource;
+
+        #[async_trait::async_trait]
+        impl PaperSource for FailingSource {
+            async fn fetch_papers(&self, _query: &str, _limit: usize) -> Result<Vec<Paper>> {
+                Err(crate::error::ResearchError::Source(
+                    "rate limited (429)".into(),
+                ))
+            }
+            fn name(&self) -> &str {
+                "failing"
+            }
+        }
+
+        let store = SqliteStore::open_in_memory().unwrap();
+        let ok = FakeSource(vec![paper("kept paper")]);
+        let failing = FailingSource;
+        let sources: [&dyn PaperSource; 2] = [&failing, &ok];
+
+        let got = run_sources(&sources, &store, "q", 10).await;
+
+        assert_eq!(got.len(), 1, "the healthy source's papers are kept");
+        assert_eq!(store.list_papers(None).unwrap().len(), 1);
     }
 
     /// Live round-trip against the real arXiv API. Ignored by default: it

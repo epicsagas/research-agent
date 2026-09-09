@@ -330,46 +330,41 @@ async fn cmd_ingest(
         let q = query
             .ok_or_else(|| anyhow::anyhow!("A search query is required for --source {source}"))?;
 
+        let mut sources: Vec<Box<dyn research_agent::ports::paper_source::PaperSource>> =
+            Vec::new();
         if source == "arxiv" || source == "all" {
-            let arxiv = research_agent::adapters::arxiv_source::ArxivSource::new();
-            let pipeline = IngestPipeline::new(&arxiv, &store);
-            let papers = pipeline.run(&q, limit).await?;
-            println!("Ingested {} papers from arXiv", papers.len());
-            all_papers.extend(papers);
+            sources.push(Box::new(
+                research_agent::adapters::arxiv_source::ArxivSource::new(),
+            ));
         }
-
         if source == "s2" || source == "all" {
-            let s2 =
-                research_agent::adapters::semantic_scholar_source::SemanticScholarSource::new();
-            let pipeline = IngestPipeline::new(&s2, &store);
-            let papers = pipeline.run(&q, limit).await?;
-            println!("Ingested {} papers from Semantic Scholar", papers.len());
-            all_papers.extend(papers);
+            sources.push(Box::new(
+                research_agent::adapters::semantic_scholar_source::SemanticScholarSource::new(),
+            ));
         }
-
         if source == "openalex" || source == "all" {
-            let oa = research_agent::adapters::openalex_source::OpenAlexSource::new();
-            let pipeline = IngestPipeline::new(&oa, &store);
-            let papers = pipeline.run(&q, limit).await?;
-            println!("Ingested {} papers from OpenAlex", papers.len());
-            all_papers.extend(papers);
+            sources.push(Box::new(
+                research_agent::adapters::openalex_source::OpenAlexSource::new(),
+            ));
         }
-
         if source == "europepmc" || source == "all" {
-            let epmc = research_agent::adapters::europepmc_source::EuropePmcSource::new();
-            let pipeline = IngestPipeline::new(&epmc, &store);
-            let papers = pipeline.run(&q, limit).await?;
-            println!("Ingested {} papers from Europe PMC", papers.len());
-            all_papers.extend(papers);
+            sources.push(Box::new(
+                research_agent::adapters::europepmc_source::EuropePmcSource::new(),
+            ));
         }
-
         if source == "preprints" || source == "all" {
-            let pre = research_agent::adapters::europepmc_source::PreprintSource::new();
-            let pipeline = IngestPipeline::new(&pre, &store);
-            let papers = pipeline.run(&q, limit).await?;
-            println!("Ingested {} papers from preprint servers", papers.len());
-            all_papers.extend(papers);
+            sources.push(Box::new(
+                research_agent::adapters::europepmc_source::PreprintSource::new(),
+            ));
         }
+        // Per-source failure is a warning, not an abort: partial success must
+        // still reach the topic-linking step below.
+        let refs: Vec<&dyn research_agent::ports::paper_source::PaperSource> =
+            sources.iter().map(|s| s.as_ref()).collect();
+        all_papers.extend(
+            research_agent::application::ingest_pipeline::run_sources(&refs, &store, &q, limit)
+                .await,
+        );
     }
 
     if let Some(topic_id) = &topic {
