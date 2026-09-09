@@ -8,10 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Zotero read source**: `research ingest --source zotero` reads papers from a running Zotero instance over its local API (`http://localhost:23119/api/`) — the item-to-Paper mapping is shared with the export-file importer, so abstracts, tags, creators, venue, and normalized DOIs all survive the trip. Query-less reads pull the whole library; queries search all fields (`qmode=everything`); pages over Zotero's 100-item page cap. Needs Zotero running with "Allow other applications on this computer to communicate with Zotero" enabled (a 403 error names this); `ZOTERO_BASE_URL` overrides the endpoint for non-default installs. Not part of `--source all`: a personal library is not a discovery source.
 - **Page anchors and evidence snippets for PDF bodies**: PDF ingest now extracts per page and writes `<!-- page N -->` markers into the stored body, so a match can be traced back to where it appeared. A page that fails mid-document triggers a warning instead of silently truncating the body (the extraction API treats a failed page as end-of-document). `research query <q> --evidence` prints the matching body text with its section and page, and the MCP `paper_body` tool accepts a `query` parameter that returns located snippets instead of the whole body (far cheaper on an agent's context). Bodies stored before this change keep working and still resolve their section; `research reingest --missing-pages` re-extracts them in place, skipping papers whose source PDF has moved.
 - **Importer field recovery**: `research import` now reads abstracts and keywords/tags from BibTeX and CSL-JSON, and accepts Zotero's native JSON export (dispatched by content, since it and CSL-JSON are both `.json`). Abstracts matter most here: the field feeds gap analysis and the search index, so imported papers previously landed semantically empty next to ingested ones.
 
 ### Changed
+- Ingest dedupes by DOI: `research ingest` now skips papers whose DOI is already in the library, matching `research import`. Re-running a source (a whole-library Zotero read, a repeated arXiv query) no longer re-inserts the same papers as fresh rows. DOI-less papers still re-ingest, as before.
 - DOIs are normalized (resolver prefix stripped, lowercased) before import dedupe, so `10.1/X`, `https://doi.org/10.1/X`, and `10.1/x` resolve to one paper instead of three rows.
 
 ## [0.1.0] - 2026-09-08

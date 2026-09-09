@@ -200,9 +200,10 @@ pub fn parse_csl_json(content: &str) -> Result<Vec<Paper>> {
 
 /// One item from Zotero's own JSON export (the "Zotero JSON" option in the
 /// export dialog), which is not CSL-JSON: it nests names under `creators` and
-/// calls the abstract `abstractNote`.
+/// calls the abstract `abstractNote`. The same item shape arrives nested under
+/// `data` in local-API responses, so `zotero_source` reuses the mapping.
 #[derive(serde::Deserialize)]
-struct ZoteroItem {
+pub(crate) struct ZoteroItem {
     #[serde(default, rename = "itemType")]
     item_type: Option<String>,
     #[serde(default)]
@@ -269,8 +270,14 @@ fn year_from_date_string(date: &str) -> Option<u32> {
 pub fn parse_zotero_json(content: &str) -> Result<Vec<Paper>> {
     let items: Vec<ZoteroItem> = serde_json::from_str(content)
         .map_err(|e| ResearchError::Source(format!("Zotero JSON parse failed: {e}")))?;
+    Ok(papers_from_zotero_items(items))
+}
 
-    Ok(items
+/// Map Zotero item objects into papers. Shared by the file-export path
+/// (`parse_zotero_json`, flat items) and the local-API path (`zotero_source`,
+/// items nested under `data`), so field handling lives in exactly one place.
+pub(crate) fn papers_from_zotero_items(items: Vec<ZoteroItem>) -> Vec<Paper> {
+    items
         .into_iter()
         .filter(|i| {
             // Attachments and notes are not papers; they ride along in exports.
@@ -313,7 +320,7 @@ pub fn parse_zotero_json(content: &str) -> Result<Vec<Paper>> {
                 .collect();
             Some(paper)
         })
-        .collect())
+        .collect()
 }
 
 /// Pick the right JSON parser for `content`. Zotero's native export marks each
