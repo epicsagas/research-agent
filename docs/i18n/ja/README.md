@@ -1,4 +1,4 @@
-<!-- Translated from README.md @ commit e45d53a (2026-09-09) -->
+<!-- Translated from README.md @ commit f2c178a (2026-09-10) -->
 <!-- If English README has changed since then, this translation may be outdated -->
 
 > このドキュメントは [README.md](../../../README.md) の翻訳版です。
@@ -110,7 +110,7 @@ Hermes はルートの `plugin.yaml` と `__init__.py` の `register(ctx)` を�
 
 **ツール一覧** (16個): `init` · `ingest` · `index_rebuild` · `import_papers` · `paper_body` · `paper_references` · `query_papers` · `topic_brief` · `gaps_record` · `list_gaps` · `report_material` · `report_save` · `topics_list` · `topic_add` · `state` · `update_read`。
 
-分析は**エージェントネイティブ**です：`topic_brief` と `report_material` が構造化されたライブラリ状態（論文、読書進捗、記録されたギャップ、カバレッジ）を渡し、エージェントが独自モデルで推論を行い、`gaps_record` / `report_save` がその結果を永続化します。MCP フロー全体で `[llm]` 設定や API キーは一切不要です。
+分析は**エージェントネイティブ**です：`topic_brief` と `report_material` が構造化されたライブラリ状態（論文、読書進捗、記録されたギャップ、カバレッジ）を渡し、エージェントが独自モデルで推論を行い、`gaps_record` / `report_save` がその結果を永続化します。本文を検証する際、`paper_body` ツールに任意の `query` パラメータを渡すことで、全文の代わりにセクションとページ位置付きの証拠スニペットを取得でき、コンテキストを大幅に節約できます。MCP フロー全体で `[llm]` 設定や API キーは一切不要です。
 
 素の JSON-RPC でサーバーのスモークテストを実行できます：
 
@@ -165,9 +165,9 @@ research --version
 | コマンド | 説明 |
 |----------|------|
 | `research init` | 研究ワークスペースの初期化（ターミナル対話型オンボーディング：プロバイダー、環境変数キー名、埋め込みモデル + ダウンロード；`--no-onboard` でスキップ） |
-| `research ingest <query> [--source arxiv\|s2\|openalex\|europepmc\|preprints\|all]` | arXiv、Semantic Scholar、OpenAlex、Europe PMC（PubMed）、プレプリントサーバー（bioRxiv、medRxiv 等）から論文を取り込む |
-| `research ingest [--source zotero] [query]` | ローカル API 経由で実行中の Zotero から論文を読み込む（"Allow other applications on this computer to communicate with Zotero" を有効にする必要があります）；クエリなしの場合はライブラリ全体を取得。`--source all` には含まれません（個人のライブラリは検索ソースではないため） |
-| `research ingest --source pdf --path <file\|dir>` | ローカル PDF ファイルを取り込む（本文テキスト全体が保存され、検索可能になります） |
+| `research ingest <query> [--source arxiv\|s2\|openalex\|europepmc\|preprints\|all] [--limit <n>] [--topic <id>]` | arXiv、Semantic Scholar、OpenAlex、Europe PMC（PubMed）、プレプリントサーバー（bioRxiv、medRxiv 等）から論文を取り込む（トピックへ直接紐付け可能） |
+| `research ingest [--source zotero] [query] [--topic <id>]` | ローカル API 経由で実行中の Zotero から論文を読み込む（`ZOTERO_BASE_URL` でエンドポイント上書き可能、"Allow other applications on this computer to communicate with Zotero" を有効にする必要があります）；クエリなしの場合はライブラリ全体を取得。`--source all` には含まれません |
+| `research ingest --source pdf --path <file\|dir> [--topic <id>]` | ローカル PDF ファイルを取り込む（本文テキスト全体が保存され、検索可能になります） |
 | `research import <file\|dir>` | BibTeX/BibLaTeX、CSL-JSON、または Zotero JSON ファイル（デスクトップエクスポートまたは API 形式）を取り込む（要約、タグ、正規化された DOI を含む）；ライブラリに既存の論文はスキップされます |
 | `research index [--rebuild]` | 検索インデックスの構築または再構築（FTS + ベクトルインデックス） |
 | `research reingest [--missing-pages]` | 保存済み PDF 本文の再抽出（ページマーカーが存在する前に取り込まれた本文にマーカーを追加） |
@@ -176,7 +176,7 @@ research --version
 | `research gaps [--topic <id>]` | 知識ギャップを分析（CLI：設定されている場合は `[llm]` を使用） |
 | `research report --topic <id>` | サーベイ レポートを生成（CLI：設定されている場合は `[llm]` を使用） |
 | `research topics list` | すべてのトピックを一覧表示 |
-| `research topics add <name>` | 新しいトピックを追加 |
+| `research topics add <name> [--parent <id>]` | 新しいトピックを追加（`--parent` を指定してサブトピックを作成） |
 | `research read <id> [--status <status>] [--rating <1-5>]` | 読書ステータスまたは評価を更新 |
 | `research read <id> --body` | 論文の保存された本文テキストを出力 |
 | `research status` | 研究状態の概要を表示 |

@@ -1,4 +1,4 @@
-<!-- Translated from README.md @ commit e45d53a (2026-09-09) -->
+<!-- Translated from README.md @ commit f2c178a (2026-09-10) -->
 <!-- If English README has changed since then, this translation may be outdated -->
 
 > Dieses Dokument ist eine Übersetzung von [README.md](../../../README.md).
@@ -110,7 +110,7 @@ Das Plugin installiert die `research`-Binärdatei beim Start automatisch und sta
 
 **Tools** (16): `init` · `ingest` · `index_rebuild` · `import_papers` · `paper_body` · `paper_references` · `query_papers` · `topic_brief` · `gaps_record` · `list_gaps` · `report_material` · `report_save` · `topics_list` · `topic_add` · `state` · `update_read`.
 
-Die Analyse ist **agenten-nativ**: `topic_brief` und `report_material` übergeben den strukturierten Bibliothekszustand (Paper, Lesestatus, erfasste Lücken, Abdeckung), der Agent zieht Schlüsse mit seinem eigenen Modell, und `gaps_record` / `report_save` sichern die Erkenntnisse. Im gesamten MCP-Ablauf ist weder eine `[llm]`-Konfiguration noch ein API-Schlüssel nötig.
+Die Analyse ist **agenten-nativ**: `topic_brief` und `report_material` übergeben den strukturierten Bibliothekszustand (Paper, Lesestatus, erfasste Lücken, Abdeckung), der Agent zieht Schlüsse mit seinem eigenen Modell, und `gaps_record` / `report_save` sichern die Erkenntnisse. Bei der Textprüfung akzeptiert `paper_body` einen optionalen `query`-Parameter, um verankerte Textbelege (mit Abschnitt und Seitenzahl) anstelle des gesamten Volltexts zurückzugeben, was wertvollen Kontext spart. Im gesamten MCP-Ablauf ist weder eine `[llm]`-Konfiguration noch ein API-Schlüssel nötig.
 
 Einfacher Funktionstest des Servers über reines JSON-RPC:
 
@@ -165,9 +165,9 @@ research --version
 | Befehl | Beschreibung |
 |--------|--------------|
 | `research init` | Forschungsworkspace initialisieren (interaktives Onboarding im Terminal: Anbieter, Umgebungsvariable für Schlüssel, Embedding-Modell + Download; `--no-onboard` zum Überspringen) |
-| `research ingest <query> [--source arxiv\|s2\|openalex\|europepmc\|preprints\|all]` | Paper von arXiv, Semantic Scholar, OpenAlex, Europe PMC (PubMed) oder Preprint-Servern (bioRxiv, medRxiv, …) erfassen |
-| `research ingest [--source zotero] [query]` | Paper aus laufendem Zotero über lokale API einlesen ("Allow other applications on this computer to communicate with Zotero" muss aktiviert sein); ohne Abfrage wird die gesamte Bibliothek geladen. Nicht Teil von `--source all` |
-| `research ingest --source pdf --path <file\|dir>` | Lokale PDF-Dateien erfassen (Volltext wird gespeichert und durchsuchbar gemacht) |
+| `research ingest <query> [--source arxiv\|s2\|openalex\|europepmc\|preprints\|all] [--limit <n>] [--topic <id>]` | Paper von arXiv, Semantic Scholar, OpenAlex, Europe PMC (PubMed) oder Preprint-Servern (bioRxiv, medRxiv, …) erfassen; optional direkt mit einem Thema verknüpfen |
+| `research ingest [--source zotero] [query] [--topic <id>]` | Paper aus laufendem Zotero über lokale API einlesen (`ZOTERO_BASE_URL` überschreibt Standard-Endpunkt, "Allow other applications on this computer to communicate with Zotero" muss aktiviert sein); ohne Abfrage wird die gesamte Bibliothek geladen. Nicht Teil von `--source all` |
+| `research ingest --source pdf --path <file\|dir> [--topic <id>]` | Lokale PDF-Dateien erfassen (Volltext wird gespeichert und durchsuchbar gemacht) |
 | `research import <file\|dir>` | BibTeX/BibLaTeX-, CSL-JSON- oder Zotero-JSON-Dateien importieren (mit Abstracts, Tags und normierten DOIs); bereits vorhandene Paper werden übersprungen |
 | `research index [--rebuild]` | Suchindex aufbauen oder neu erstellen (FTS + Vektorindex) |
 | `research reingest [--missing-pages]` | Gespeicherte PDF-Texte erneut extrahieren (fügt Seitenmarkierungen hinzu) |
@@ -176,7 +176,7 @@ research --version
 | `research gaps [--topic <id>]` | Wissenslücken analysieren (CLI: verwendet `[llm]`, falls konfiguriert) |
 | `research report --topic <id>` | Übersichtsbericht erstellen (CLI: verwendet `[llm]`, falls konfiguriert) |
 | `research topics list` | Alle Themen auflisten |
-| `research topics add <name>` | Neues Thema hinzufügen |
+| `research topics add <name> [--parent <id>]` | Neues Thema hinzufügen (`--parent` angeben, um ein Unterthema zu erstellen) |
 | `research read <id> [--status <status>] [--rating <1-5>]` | Lesestatus oder Bewertung aktualisieren |
 | `research read <id> --body` | Gespeicherten Volltext eines Papers ausgeben |
 | `research status` | Gesamtstatus der Forschung anzeigen |

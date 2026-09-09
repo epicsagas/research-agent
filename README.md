@@ -122,7 +122,9 @@ directly; no human typing CLI commands.
 Analysis is **agent-native**: `topic_brief` and `report_material` hand over the
 structured library state (papers, reading progress, recorded gaps, coverage),
 the agent reasons over it with its own model, and `gaps_record` / `report_save`
-persist the findings. No `[llm]` config or API key is required anywhere in the
+persist the findings. When inspecting text, `paper_body` accepts an optional `query`
+to return anchored evidence snippets (with section and page) instead of the whole body,
+saving context. No `[llm]` config or API key is required anywhere in the
 MCP flow.
 
 Smoke test the server over raw JSON-RPC:
@@ -188,9 +190,9 @@ research --version
 | Command | Description |
 |---------|-------------|
 | `research init` | Initialize research workspace (interactive onboarding in a terminal: provider, env-var key name, embedding model + download; `--no-onboard` to skip) |
-| `research ingest <query> [--source arxiv\|s2\|openalex\|europepmc\|preprints\|all]` | Ingest papers from arXiv, Semantic Scholar, OpenAlex, Europe PMC (PubMed), or preprint servers (bioRxiv, medRxiv, …) |
-| `research ingest [--source zotero] [query]` | Read papers from a running Zotero over its local API (needs "Allow other applications on this computer to communicate with Zotero" enabled); no query pulls the whole library. Not part of `--source all` — a personal library is not a discovery source |
-| `research ingest --source pdf --path <file\|dir>` | Ingest local PDF files (full body text is stored and searchable) |
+| `research ingest <query> [--source arxiv\|s2\|openalex\|europepmc\|preprints\|all] [--limit <n>] [--topic <id>]` | Ingest papers from arXiv, Semantic Scholar, OpenAlex, Europe PMC (PubMed), or preprint servers (bioRxiv, medRxiv, …); optionally link directly to a topic |
+| `research ingest [--source zotero] [query] [--topic <id>]` | Read papers from a running Zotero over its local API (`ZOTERO_BASE_URL` overrides default endpoint, needs "Allow other applications on this computer to communicate with Zotero" enabled); no query pulls the whole library. Not part of `--source all` — a personal library is not a discovery source |
+| `research ingest --source pdf --path <file\|dir> [--topic <id>]` | Ingest local PDF files (full body text is stored and searchable) |
 | `research import <file\|dir>` | Import BibTeX/BibLaTeX, CSL-JSON, or Zotero JSON files (desktop export or API shape), with abstracts, tags, and normalized DOIs; re-imports skip papers already in the library |
 | `research index [--rebuild]` | Build or rebuild search index (FTS + vector index) |
 | `research reingest [--missing-pages]` | Re-extract stored PDF bodies (adds page markers to bodies ingested before they existed) |
@@ -199,7 +201,7 @@ research --version
 | `research gaps [--topic <id>]` | Analyze knowledge gaps (CLI: uses `[llm]` if configured) |
 | `research report --topic <id>` | Generate research report (CLI: uses `[llm]` if configured) |
 | `research topics list` | List all topics |
-| `research topics add <name>` | Add a new topic |
+| `research topics add <name> [--parent <id>]` | Add a new topic (specify `--parent` to create a sub-topic) |
 | `research read <id> [--status <status>] [--rating <1-5>]` | Update reading status or rating |
 | `research read <id> --body` | Print a paper's stored body text |
 | `research status` | Show research state overview |

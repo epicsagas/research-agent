@@ -1,4 +1,4 @@
-<!-- Translated from README.md @ commit e45d53a (2026-09-09) -->
+<!-- Translated from README.md @ commit f2c178a (2026-09-10) -->
 <!-- If English README has changed since then, this translation may be outdated -->
 
 > Этот документ является переводом [README.md](../../../README.md).
@@ -110,7 +110,7 @@ Hermes загружает корневой `plugin.yaml` и функцию `regi
 
 **Инструменты** (16): `init` · `ingest` · `index_rebuild` · `import_papers` · `paper_body` · `paper_references` · `query_papers` · `topic_brief` · `gaps_record` · `list_gaps` · `report_material` · `report_save` · `topics_list` · `topic_add` · `state` · `update_read`.
 
-Анализ является **нативным для агента**: `topic_brief` и `report_material` передают структурированное состояние библиотеки (статьи, прогресс чтения, записанные пробелы, покрытие темы), агент делает выводы с помощью своей модели, а `gaps_record` / `report_save` сохраняют результаты. Никакой настройки `[llm]` или внешнего ключа API для работы MCP не требуется.
+Анализ является **нативным для агента**: `topic_brief` и `report_material` передают структурированное состояние библиотеки (статьи, прогресс чтения, записанные пробелы, покрытие темы), агент делает выводы с помощью своей модели, а `gaps_record` / `report_save` сохраняют результаты. При анализе текста инструмент `paper_body` принимает опциональный параметр `query` для возврата точных фрагментов с указанием раздела и номера страницы вместо всего текста, что существенно экономит контекст. Никакой настройки `[llm]` или внешнего ключа API для работы MCP не требуется.
 
 Проверка работоспособности сервера через чистый JSON-RPC:
 
@@ -165,9 +165,9 @@ research --version
 | Команда | Описание |
 |---------|----------|
 | `research init` | Инициализация рабочего пространства (интерактивный мастер в терминале: выбор провайдера, переменной окружения для ключа, модели эмбеддингов + загрузка; `--no-onboard` для пропуска) |
-| `research ingest <query> [--source arxiv\|s2\|openalex\|europepmc\|preprints\|all]` | Загрузка статей из arXiv, Semantic Scholar, OpenAlex, Europe PMC (PubMed) или серверов препринтов (bioRxiv, medRxiv и др.) |
-| `research ingest [--source zotero] [query]` | Чтение статей из запущенного Zotero через локальный API (необходимо включить "Allow other applications on this computer to communicate with Zotero"); без запроса загружается вся библиотека. Не входит в `--source all` |
-| `research ingest --source pdf --path <file\|dir>` | Загрузка локальных PDF-файлов (полный текст сохраняется и доступен для поиска) |
+| `research ingest <query> [--source arxiv\|s2\|openalex\|europepmc\|preprints\|all] [--limit <n>] [--topic <id>]` | Загрузка статей из arXiv, Semantic Scholar, OpenAlex, Europe PMC (PubMed) или серверов препринтов (bioRxiv, medRxiv и др.); можно сразу связать с темой |
+| `research ingest [--source zotero] [query] [--topic <id>]` | Чтение статей из запущенного Zotero через локальный API (`ZOTERO_BASE_URL` переопределяет адрес по умолчанию, необходимо включить "Allow other applications on this computer to communicate with Zotero"); без запроса загружается вся библиотека. Не входит в `--source all` |
+| `research ingest --source pdf --path <file\|dir> [--topic <id>]` | Загрузка локальных PDF-файлов (полный текст сохраняется и доступен для поиска) |
 | `research import <file\|dir>` | Импорт файлов BibTeX/BibLaTeX, CSL-JSON или Zotero JSON (экспорт приложения или API-формат) с аннотациями, тегами и нормализованными DOI; существующие статьи пропускаются |
 | `research index [--rebuild]` | Создание или перестроение поискового индекса (FTS + векторный индекс) |
 | `research reingest [--missing-pages]` | Повторное извлечение текста сохраненных PDF (добавляет маркеры страниц) |
@@ -176,7 +176,7 @@ research --version
 | `research gaps [--topic <id>]` | Анализ пробелов в знаниях (в CLI: использует `[llm]`, если настроен) |
 | `research report --topic <id>` | Генерация исследовательского обзора (в CLI: использует `[llm]`, если настроен) |
 | `research topics list` | Список всех тем исследований |
-| `research topics add <name>` | Добавление новой темы |
+| `research topics add <name> [--parent <id>]` | Добавление новой темы (укажите `--parent` для создания подтемы) |
 | `research read <id> [--status <status>] [--rating <1-5>]` | Обновление статуса чтения или рейтинга статьи |
 | `research read <id> --body` | Вывод сохраненного текста статьи |
 | `research status` | Общий обзор состояния исследований |

@@ -1,4 +1,4 @@
-<!-- Translated from README.md @ commit e45d53a (2026-09-09) -->
+<!-- Translated from README.md @ commit f2c178a (2026-09-10) -->
 <!-- If English README has changed since then, this translation may be outdated -->
 
 > 本文件為 [README.md](../../../README.md) 的繁體中文翻譯版本。
@@ -110,7 +110,7 @@ Hermes 會載入根目錄下的 `plugin.yaml` 與 `__init__.py` 中的 `register
 
 **可用工具**（共 16 個）: `init` · `ingest` · `index_rebuild` · `import_papers` · `paper_body` · `paper_references` · `query_papers` · `topic_brief` · `gaps_record` · `list_gaps` · `report_material` · `report_save` · `topics_list` · `topic_add` · `state` · `update_read`。
 
-分析流程採用 **Agent 原生架構**：`topic_brief` 與 `report_material` 負責傳遞結構化的文獻庫狀態（論文列表、閱讀進度、記錄的缺口、覆蓋率），Agent 藉由自身模型進行推理，再透過 `gaps_record` / `report_save` 永久儲存結果。在整個 MCP 流程中完全無需 `[llm]` 設定或 API 金鑰。
+分析流程採用 **Agent 原生架構**：`topic_brief` 與 `report_material` 負責傳遞結構化的文獻庫狀態（論文列表、閱讀進度、記錄的缺口、覆蓋率），Agent 藉由自身模型進行推理，再透過 `gaps_record` / `report_save` 永久儲存結果。在審閱內文時，`paper_body` 工具可接收選填的 `query` 參數，回傳附帶章節與頁碼定位的證據片段，而非整份全文，進而大幅節省上下文 Token。在整個 MCP 流程中完全無需 `[llm]` 設定或 API 金鑰。
 
 可透過原始 JSON-RPC 對伺服器進行冒煙測試：
 
@@ -165,9 +165,9 @@ research --version
 | 指令 | 說明 |
 |------|------|
 | `research init` | 初始化研究工作區（終端機互動式引導：選擇供應商、環境變數名稱、Embedding 模型與下載；使用 `--no-onboard` 略過） |
-| `research ingest <query> [--source arxiv\|s2\|openalex\|europepmc\|preprints\|all]` | 從 arXiv、Semantic Scholar、OpenAlex、Europe PMC (PubMed) 或預印本來源 (bioRxiv, medRxiv 等) 擷取論文 |
-| `research ingest [--source zotero] [query]` | 透過本機 API 從執行中的 Zotero 讀取論文（需啟用 "Allow other applications on this computer to communicate with Zotero"）；若無查詢條件則抓取整個文庫。不包含於 `--source all`（個人文庫不屬於探索來源） |
-| `research ingest --source pdf --path <file\|dir>` | 擷取本機 PDF 檔案（儲存全文並支援全文檢索） |
+| `research ingest <query> [--source arxiv\|s2\|openalex\|europepmc\|preprints\|all] [--limit <n>] [--topic <id>]` | 從 arXiv、Semantic Scholar、OpenAlex、Europe PMC (PubMed) 或預印本來源 (bioRxiv, medRxiv 等) 擷取論文；可直接關聯至指定主題 |
+| `research ingest [--source zotero] [query] [--topic <id>]` | 透過本機 API 從執行中的 Zotero 讀取論文（支援透過 `ZOTERO_BASE_URL` 覆寫預設端點，需啟用 "Allow other applications on this computer to communicate with Zotero"）；若無查詢條件則抓取整個文庫。不包含於 `--source all` |
+| `research ingest --source pdf --path <file\|dir> [--topic <id>]` | 擷取本機 PDF 檔案（儲存全文並支援全文檢索） |
 | `research import <file\|dir>` | 匯入 BibTeX/BibLaTeX、CSL-JSON 或 Zotero JSON 檔案（桌面匯出或 API 結構），保留摘要、標籤與正規化 DOI；文庫中既有的論文將自動略過 |
 | `research index [--rebuild]` | 建置或重新建置搜尋索引（FTS 全文檢索 + 向量索引） |
 | `research reingest [--missing-pages]` | 重新擷取已儲存的 PDF 內文（為先前缺少頁碼標記的內容補上頁碼） |
@@ -176,7 +176,7 @@ research --version
 | `research gaps [--topic <id>]` | 分析知識覆蓋盲區（CLI 模式：若有設定則使用 `[llm]`） |
 | `research report --topic <id>` | 產出文獻綜述報告（CLI 模式：若有設定則使用 `[llm]`） |
 | `research topics list` | 列出所有研究主題 |
-| `research topics add <name>` | 新增研究主題 |
+| `research topics add <name> [--parent <id>]` | 新增研究主題（使用 `--parent` 建立子主題） |
 | `research read <id> [--status <status>] [--rating <1-5>]` | 更新閱讀狀態或評分 |
 | `research read <id> --body` | 印出論文已儲存的內文 |
 | `research status` | 檢視整體研究狀態總覽 |

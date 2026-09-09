@@ -1,4 +1,4 @@
-<!-- Translated from README.md @ commit e45d53a (2026-09-09) -->
+<!-- Translated from README.md @ commit f2c178a (2026-09-10) -->
 <!-- If English README has changed since then, this translation may be outdated -->
 
 > 이 문서는 [README.md](../../../README.md)의 번역본입니다.
@@ -110,7 +110,7 @@ Hermes는 루트 `plugin.yaml`과 `__init__.py`의 `register(ctx)`를 로드합�
 
 **도구 목록** (16개): `init` · `ingest` · `index_rebuild` · `import_papers` · `paper_body` · `paper_references` · `query_papers` · `topic_brief` · `gaps_record` · `list_gaps` · `report_material` · `report_save` · `topics_list` · `topic_add` · `state` · `update_read`.
 
-분석은 **에이전트 네이티브** 방식으로 이루어집니다. `topic_brief`와 `report_material`이 구조화된 라이브러리 상태(논문, 읽기 진행 상황, 기록된 공백, 커버리지)를 전달하면, 에이전트가 자체 모델로 추론하고 `gaps_record` / `report_save`가 분석 결과를 저장합니다. MCP 워크플로 전체에서 `[llm]` 설정이나 API 키가 전혀 필요하지 않습니다.
+분석은 **에이전트 네이티브** 방식으로 이루어집니다. `topic_brief`와 `report_material`이 구조화된 라이브러리 상태(논문, 읽기 진행 상황, 기록된 공백, 커버리지)를 전달하면, 에이전트가 자체 모델로 추론하고 `gaps_record` / `report_save`가 분석 결과를 저장합니다. 본문 검토 시 `paper_body` 도구에 선택적 `query` 파라미터를 전달하여 전체 본문 대신 섹션 및 페이지가 표시된 증거 스니펫을 반환받아 컨텍스트를 크게 절약할 수 있습니다. MCP 워크플로 전체에서 `[llm]` 설정이나 API 키가 전혀 필요하지 않습니다.
 
 원시 JSON-RPC를 통해 서버 스모크 테스트를 실행할 수 있습니다:
 
@@ -165,9 +165,9 @@ research --version
 | 명령어 | 설명 |
 |--------|------|
 | `research init` | 연구 워크스페이스 초기화 (터미널 대화형 온보딩: 제공자, 환경 변수 키 이름, 임베딩 모델 + 다운로드; `--no-onboard`로 건너뛰기) |
-| `research ingest <query> [--source arxiv\|s2\|openalex\|europepmc\|preprints\|all]` | arXiv, Semantic Scholar, OpenAlex, Europe PMC (PubMed), 프리프린트 서버(bioRxiv, medRxiv 등)에서 논문 수집 |
-| `research ingest [--source zotero] [query]` | 로컬 API를 통해 실행 중인 Zotero에서 논문 읽기("Allow other applications on this computer to communicate with Zotero" 활성화 필요); 쿼리가 없으면 전체 라이브러리 가져옴. `--source all`에는 포함되지 않음 — 개인 라이브러리는 발견 소스가 아님 |
-| `research ingest --source pdf --path <file\|dir>` | 로컬 PDF 파일 수집 (본문 전체 텍스트가 저장되어 검색 가능) |
+| `research ingest <query> [--source arxiv\|s2\|openalex\|europepmc\|preprints\|all] [--limit <n>] [--topic <id>]` | arXiv, Semantic Scholar, OpenAlex, Europe PMC (PubMed), 프리프린트 서버(bioRxiv, medRxiv 등)에서 논문 수집; 선택적으로 특정 토픽에 바로 연결 |
+| `research ingest [--source zotero] [query] [--topic <id>]` | 로컬 API를 통해 실행 중인 Zotero에서 논문 읽기(`ZOTERO_BASE_URL`로 엔드포인트 재정의 가능, "Allow other applications on this computer to communicate with Zotero" 활성화 필요); 쿼리가 없으면 전체 라이브러리 가져옴. `--source all`에는 포함되지 않음 — 개인 라이브러리는 발견 소스가 아님 |
+| `research ingest --source pdf --path <file\|dir> [--topic <id>]` | 로컬 PDF 파일 수집 (본문 전체 텍스트가 저장되어 검색 가능) |
 | `research import <file\|dir>` | BibTeX/BibLaTeX, CSL-JSON 또는 Zotero JSON 파일(데스크톱 내보내기 또는 API 형식) 가져오기(초록, 태그, 정규화된 DOI 포함); 이미 라이브러리에 있는 논문은 건너뜀 |
 | `research index [--rebuild]` | 검색 인덱스 생성 또는 재생성 (FTS + 벡터 인덱스) |
 | `research reingest [--missing-pages]` | 저장된 PDF 본문 재추출 (페이지 마커가 생기기 전에 수집된 본문에 마커 추가) |
@@ -176,7 +176,7 @@ research --version
 | `research gaps [--topic <id>]` | 지식 공백 분석 (CLI: 설정된 경우 `[llm]` 사용) |
 | `research report --topic <id>` | 연구 서베이 리포트 생성 (CLI: 설정된 경우 `[llm]` 사용) |
 | `research topics list` | 모든 토픽 목록 표시 |
-| `research topics add <name>` | 새 토픽 추가 |
+| `research topics add <name> [--parent <id>]` | 새 토픽 추가 (`--parent`를 지정하여 하위 토픽 생성) |
 | `research read <id> [--status <status>] [--rating <1-5>]` | 읽기 상태 또는 평점 업데이트 |
 | `research read <id> --body` | 논문의 저장된 본문 텍스트 출력 |
 | `research status` | 연구 상태 개요 표시 |

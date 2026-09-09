@@ -1,4 +1,4 @@
-<!-- Translated from README.md @ commit e45d53a (2026-09-09) -->
+<!-- Translated from README.md @ commit f2c178a (2026-09-10) -->
 <!-- If English README has changed since then, this translation may be outdated -->
 
 > Ce document est une traduction de [README.md](../../../README.md).
@@ -110,7 +110,7 @@ Le plugin installe automatiquement le binaire `research` au démarrage de la ses
 
 **Outils** (16) : `init` · `ingest` · `index_rebuild` · `import_papers` · `paper_body` · `paper_references` · `query_papers` · `topic_brief` · `gaps_record` · `list_gaps` · `report_material` · `report_save` · `topics_list` · `topic_add` · `state` · `update_read`.
 
-L'analyse est **native à l'agent** : `topic_brief` et `report_material` transmettent l'état structuré de la bibliothèque (articles, avancement de lecture, lacunes enregistrées, couverture), l'agent effectue le raisonnement avec son propre modèle, et `gaps_record` / `report_save` sauvegardent les conclusions. Aucune configuration `[llm]` ni clé d'API n'est requise dans le flux MCP.
+L'analyse est **native à l'agent** : `topic_brief` et `report_material` transmettent l'état structuré de la bibliothèque (articles, avancement de lecture, lacunes enregistrées, couverture), l'agent effectue le raisonnement avec son propre modèle, et `gaps_record` / `report_save` sauvegardent les conclusions. Lors de l'examen d'un texte, l'outil `paper_body` accepte un paramètre optionnel `query` pour renvoyer des extraits de preuves situés (avec section et page) plutôt que le corps entier, économisant ainsi le contexte. Aucune configuration `[llm]` ni clé d'API n'est requise dans le flux MCP.
 
 Testez rapidement le serveur avec du JSON-RPC brut :
 
@@ -165,9 +165,9 @@ research --version
 | Commande | Description |
 |----------|-------------|
 | `research init` | Initialise l'espace de travail (assistant interactif en terminal : fournisseur, variable d'environnement de la clé, modèle d'embedding + téléchargement ; `--no-onboard` pour ignorer) |
-| `research ingest <query> [--source arxiv\|s2\|openalex\|europepmc\|preprints\|all]` | Ingère des articles depuis arXiv, Semantic Scholar, OpenAlex, Europe PMC (PubMed) ou des serveurs de prépublications (bioRxiv, medRxiv, …) |
-| `research ingest [--source zotero] [query]` | Lit les articles depuis une instance Zotero en cours d'exécution via son API locale (requiert l'activation de "Autoriser d'autres applications à communiquer avec Zotero") ; sans requête, toute la bibliothèque est récupérée. Exclu de `--source all` |
-| `research ingest --source pdf --path <file\|dir>` | Ingère des fichiers PDF locaux (le corps de texte complet est indexé et recherchable) |
+| `research ingest <query> [--source arxiv\|s2\|openalex\|europepmc\|preprints\|all] [--limit <n>] [--topic <id>]` | Ingère des articles depuis arXiv, Semantic Scholar, OpenAlex, Europe PMC (PubMed) ou des serveurs de prépublications (bioRxiv, medRxiv, …) ; peut être directement lié à un thème |
+| `research ingest [--source zotero] [query] [--topic <id>]` | Lit les articles depuis une instance Zotero en cours d'exécution via son API locale (`ZOTERO_BASE_URL` remplace le point de terminaison par défaut, requiert l'activation de "Autoriser d'autres applications à communiquer avec Zotero") ; sans requête, toute la bibliothèque est récupérée. Exclu de `--source all` |
+| `research ingest --source pdf --path <file\|dir> [--topic <id>]` | Ingère des fichiers PDF locaux (le corps de texte complet est indexé et recherchable) |
 | `research import <file\|dir>` | Importe des fichiers BibTeX/BibLaTeX, CSL-JSON ou Zotero JSON (export de bureau ou format API) avec résumés, étiquettes et DOI normalisés ; ignore les articles déjà présents |
 | `research index [--rebuild]` | Crée ou reconstruit l'index de recherche (FTS + index vectoriel) |
 | `research reingest [--missing-pages]` | Réextrait le corps des PDF stockés (ajoute les marqueurs de page aux articles ingérés avant leur support) |
@@ -176,7 +176,7 @@ research --version
 | `research gaps [--topic <id>]` | Analyse les lacunes de connaissances (CLI : utilise `[llm]` si configuré) |
 | `research report --topic <id>` | Génère un rapport de synthèse (CLI : utilise `[llm]` si configuré) |
 | `research topics list` | Liste tous les thèmes de recherche |
-| `research topics add <name>` | Ajoute un nouveau thème |
+| `research topics add <name> [--parent <id>]` | Ajoute un nouveau thème (spécifier `--parent` pour créer un sous-thème) |
 | `research read <id> [--status <status>] [--rating <1-5>]` | Met à jour le statut de lecture ou la note |
 | `research read <id> --body` | Affiche le corps de texte stocké d'un article |
 | `research status` | Affiche l'état global de la recherche |

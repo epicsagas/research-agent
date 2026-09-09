@@ -1,4 +1,4 @@
-<!-- Translated from README.md @ commit e45d53a (2026-09-09) -->
+<!-- Translated from README.md @ commit f2c178a (2026-09-10) -->
 <!-- If English README has changed since then, this translation may be outdated -->
 
 > Questo documento è una traduzione di [README.md](../../../README.md).
@@ -110,7 +110,7 @@ Il plugin installa automaticamente il binario `research` all'inizio della sessio
 
 **Strumenti** (16): `init` · `ingest` · `index_rebuild` · `import_papers` · `paper_body` · `paper_references` · `query_papers` · `topic_brief` · `gaps_record` · `list_gaps` · `report_material` · `report_save` · `topics_list` · `topic_add` · `state` · `update_read`.
 
-L'analisi è **nativa per l'agente**: `topic_brief` e `report_material` forniscono lo stato strutturato della libreria (articoli, stato di lettura, lacune registrate, copertura), l'agente elabora le considerazioni con il proprio modello e `gaps_record` / `report_save` persistono i risultati. Non è richiesta alcuna configurazione `[llm]` o chiave API durante l'uso tramite MCP.
+L'analisi è **nativa per l'agente**: `topic_brief` e `report_material` forniscono lo stato strutturato della libreria (articoli, stato di lettura, lacune registrate, copertura), l'agente elabora le considerazioni con il proprio modello e `gaps_record` / `report_save` persistono i risultati. Quando si esamina il testo, `paper_body` accetta un parametro facoltativo `query` per restituire frammenti di prova localizzati (con sezione e pagina) anziché l'intero corpo del testo, risparmiando contesto. Non è richiesta alcuna configurazione `[llm]` o chiave API durante l'uso tramite MCP.
 
 Verifica rapida del server tramite JSON-RPC non formattato:
 
@@ -165,9 +165,9 @@ research --version
 | Comando | Descrizione |
 |---------|-------------|
 | `research init` | Inizializza l'ambiente di ricerca (configurazione interattiva da terminale: provider, variabile d'ambiente della chiave, modello di embedding + download; `--no-onboard` per saltare) |
-| `research ingest <query> [--source arxiv\|s2\|openalex\|europepmc\|preprints\|all]` | Raccoglie articoli da arXiv, Semantic Scholar, OpenAlex, Europe PMC (PubMed) o server di preprint (bioRxiv, medRxiv, …) |
-| `research ingest [--source zotero] [query]` | Legge articoli da un'istanza Zotero attiva tramite API locale (richiede l'attivazione di "Consenti ad altre applicazioni di comunicare con Zotero"); senza query estrae l'intera libreria. Escluso da `--source all` |
-| `research ingest --source pdf --path <file\|dir>` | Raccoglie file PDF locali (il testo completo viene salvato e reso ricercabile) |
+| `research ingest <query> [--source arxiv\|s2\|openalex\|europepmc\|preprints\|all] [--limit <n>] [--topic <id>]` | Raccoglie articoli da arXiv, Semantic Scholar, OpenAlex, Europe PMC (PubMed) o server di preprint (bioRxiv, medRxiv, …); collegabile opzionalmente a un argomento |
+| `research ingest [--source zotero] [query] [--topic <id>]` | Legge articoli da un'istanza Zotero attiva tramite API locale (`ZOTERO_BASE_URL` sovrascrive l'endpoint predefinito, richiede l'attivazione di "Consenti ad altre applicazioni di comunicare con Zotero"); senza query estrae l'intera libreria. Escluso da `--source all` |
+| `research ingest --source pdf --path <file\|dir> [--topic <id>]` | Raccoglie file PDF locali (il testo completo viene salvato e reso ricercabile) |
 | `research import <file\|dir>` | Importa file BibTeX/BibLaTeX, CSL-JSON o Zotero JSON (esportazione desktop o formato API) con abstract, tag e DOI normalizzati; gli articoli già presenti vengono ignorati |
 | `research index [--rebuild]` | Crea o ricostruisce l'indice di ricerca (FTS + indice vettoriale) |
 | `research reingest [--missing-pages]` | Riestrae il testo dei PDF memorizzati (aggiunge i marcatori di pagina ai file acquisiti in precedenza) |
@@ -176,7 +176,7 @@ research --version
 | `research gaps [--topic <id>]` | Analizza le lacune di conoscenza (CLI: usa `[llm]` se configurato) |
 | `research report --topic <id>` | Genera un report di revisione (CLI: usa `[llm]` se configurato) |
 | `research topics list` | Elenca tutti gli argomenti |
-| `research topics add <name>` | Aggiunge un nuovo argomento |
+| `research topics add <name> [--parent <id>]` | Aggiunge un nuovo argomento (specificare `--parent` per creare un sotto-argomento) |
 | `research read <id> [--status <status>] [--rating <1-5>]` | Aggiorna lo stato di lettura o la valutazione |
 | `research read <id> --body` | Stampa il corpo del testo archiviato di un articolo |
 | `research status` | Mostra una panoramica dello stato della ricerca |
