@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>research-agent — Your long-term research memory</title>
+<meta name="description" content="research-agent indexes papers from arXiv, Semantic Scholar and local PDFs, finds your knowledge gaps, and generates research reports. Single binary, MCP-native.">
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #4493f8;
+    --green: #3fb950; --purple: #ab7df8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 0 24px; }
+  nav { display: flex; align-items: center; gap: 20px; padding: 20px 0; }
+  nav .brand { font-weight: 700; }
+  nav a { color: var(--muted); text-decoration: none; font-size: 14px; }
+  nav a:hover { color: var(--text); }
+  nav .right { margin-left: auto; }
+  .badge { border: 1px solid var(--border); border-radius: 20px; padding: 3px 12px; font-size: 13px; }
+
+  .hero { text-align: center; padding: 72px 0 56px; }
+  .hero h1 { font-size: 44px; line-height: 1.15; margin: 0 0 18px; letter-spacing: -.02em; }
+  .hero h1 em { color: var(--accent); font-style: normal; }
+  .hero p.sub { color: var(--muted); font-size: 19px; max-width: 640px; margin: 0 auto 32px; }
+  .cta { display: inline-flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+  .btn { border-radius: 8px; padding: 11px 22px; font-size: 15px; text-decoration: none; font-weight: 600; }
+  .btn.primary { background: var(--accent); color: #fff; }
+  .btn.ghost { border: 1px solid var(--border); color: var(--text); }
+  .btn:hover { opacity: .9; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin: 40px 0; }
+  .feature { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 22px; }
+  .feature .icon { font-size: 24px; }
+  .feature h3 { margin: 10px 0 6px; font-size: 16px; }
+  .feature p { margin: 0; color: var(--muted); font-size: 14px; }
+
+  h2 { font-size: 28px; text-align: center; margin: 64px 0 8px; letter-spacing: -.01em; }
+  .section-sub { text-align: center; color: var(--muted); margin: 0 0 28px; }
+
+  pre {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 20px 24px; overflow-x: auto; font: 13px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  pre .c { color: var(--muted); }
+  pre .p { color: var(--green); }
+
+  .flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: 32px 0; }
+  .step { text-align: center; padding: 18px; border: 1px dashed var(--border); border-radius: 12px; }
+  .step .n { color: var(--purple); font-weight: 700; font-size: 13px; }
+  .step h4 { margin: 6px 0 4px; }
+  .step p { margin: 0; color: var(--muted); font-size: 13px; }
+
+  footer { border-top: 1px solid var(--border); margin-top: 72px; padding: 28px 0; color: var(--muted); font-size: 13px; text-align: center; }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<nav>
+  <span class="brand">research-agent</span>
+  <a href="#features">Features</a>
+  <a href="#workflow">Workflow</a>
+  <a href="#quickstart">Quick Start</a>
+  <a class="right" href="https://github.com/epicsagas/research-agent">GitHub</a>
+</nav>
+
+<section class="hero">
+  <span class="badge">🦀 Single binary · MCP-native</span>
+  <h1>Your long-term<br><em>research memory</em></h1>
+  <p class="sub">research-agent indexes papers from arXiv, Semantic Scholar, and your local PDFs — then tells you what you've read, what you've missed, and what to read next.</p>
+  <div class="cta">
+    <a class="btn primary" href="#quickstart">Get started</a>
+    <a class="btn ghost" href="https://github.com/epicsagas/research-agent">View source</a>
+  </div>
+</section>
+
+<section id="features">
+  <h2>Everything a research trail needs</h2>
+  <p class="section-sub">From "I should read about this" to a cited literature review.</p>
+  <div class="grid">
+    <div class="feature"><div class="icon">📚</div><h3>Paper indexing</h3><p>Ingest from arXiv, Semantic Scholar, or drop in local PDFs. Deduplicated, full-text searchable via SQLite FTS5.</p></div>
+    <div class="feature"><div class="icon">🎯</div><h3>Gap analysis</h3><p>An LLM maps your topic coverage and surfaces what's missing — unread literature, unanswered questions, methodological holes.</p></div>
+    <div class="feature"><div class="icon">📊</div><h3>Research reports</h3><p>Generate literature reviews and state-of-the-field summaries over any topic, saved as Markdown.</p></div>
+    <div class="feature"><div class="icon">📂</div><h3>Topic trees</h3><p>Organize research hierarchically with sub-topics, priorities, and per-topic coverage scores.</p></div>
+    <div class="feature"><div class="icon">📖</div><h3>Reading tracker</h3><p>Queue, skim, deep-read, and rate papers 1–5. Your reading pipeline, tracked.</p></div>
+    <div class="feature"><div class="icon">🖥️</div><h3>Local dashboard</h3><p><code>research dashboard</code> opens a live web view of your library, pipeline, history, and reports. Read-only, localhost-only.</p></div>
+  </div>
+</section>
+
+<section id="workflow">
+  <h2>How it works</h2>
+  <p class="section-sub">One loop you run for the life of a research question.</p>
+  <div class="flow">
+    <div class="step"><div class="n">STEP 1</div><h4>Ingest</h4><p>Pull papers from arXiv, S2, or PDFs into your local index.</p></div>
+    <div class="step"><div class="n">STEP 2</div><h4>Track</h4><p>Mark what you've read; rate what mattered.</p></div>
+    <div class="step"><div class="n">STEP 3</div><h4>Analyze</h4><p>Gap analysis finds the holes in your coverage.</p></div>
+    <div class="step"><div class="n">STEP 4</div><h4>Report</h4><p>Generate a survey — then repeat with sharper queries.</p></div>
+  </div>
+</section>
+
+<section id="quickstart">
+  <h2>Quick start</h2>
+  <p class="section-sub">Three commands from zero to a survey.</p>
+<pre><span class="c"># Install (or: cargo install / brew)</span>
+<span class="p">curl</span> --proto '=https' --tlsv1.2 -LsSf \
+  https://github.com/epicsagas/research-agent/releases/latest/download/install.sh | sh
+
+<span class="c"># Initialize your workspace</span>
+<span class="p">research</span> init
+
+<span class="c"># Build a topic and pull papers</span>
+<span class="p">research</span> topics add "Rust async runtime design"
+<span class="p">research</span> ingest "async runtime scheduling" --source arxiv --topic &lt;topic-id&gt;
+
+<span class="c"># Find your gaps, then write it up</span>
+<span class="p">research</span> gaps --topic &lt;topic-id&gt;
+<span class="p">research</span> report --topic &lt;topic-id&gt; --title "Rust Async Survey"</pre>
+</section>
+
+<footer>
+  Built by <a href="https://github.com/epiccounty">Epic County</a> · AI Labs ·
+  <a href="https://github.com/epicsagas/research-agent">GitHub</a> ·
+  Also available as an MCP server for Claude Code &amp; Codex
+</footer>
+
+</div>
+</body>
+</html>
