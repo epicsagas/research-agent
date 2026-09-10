@@ -4,6 +4,20 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>research-agent</title>
+<!-- Rich rendering (markdown / KaTeX / mermaid) — progressive enhancement:
+     offline or blocked, the app falls back to escaped plain text. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script type="module">
+  // mermaid v11 ships as ESM only; pull it lazily and expose the same way
+  // as the other UMD libs so the render helpers can feature-detect.
+  import("https://cdn.jsdelivr.net/npm/mermaid@11/+esm")
+    .then(m => { window.mermaid = m.default; window.mermaid.initialize({ startOnLoad: false }); })
+    .catch(() => {});
+</script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%2314120E'/%3E%3Cpath d='M4 4.5h5.5L11 6v5.5H4z' fill='none' stroke='%23F0BE3A' stroke-width='1.3'/%3E%3C/svg%3E">
 <style>
   /* ── Night reading room ───────────────────────────────────────────
@@ -303,12 +317,13 @@
   .drawer {
     /* Centred modal, not a right-edge drawer: a paper's abstract is the
        reason to open this, and 440px of edge column made it a narrow ribbon.
-       max-height + overflow keeps a long abstract scrollable inside the card
-       instead of pushing the page. */
+       Full viewport height — the card fills the screen top to bottom, and
+       overflow-y keeps a long abstract scrollable inside instead of pushing
+       the page. 100vh first for browsers without dvh. */
     /* inset:0 + margin:auto centres against the visual viewport; left:50%
        measures the scrollbar-less width and lands a few px off. */
     position: fixed; inset: 0; margin: auto;
-    width: min(760px, 92vw); height: fit-content; max-height: min(84vh, 900px);
+    width: min(760px, 92vw); height: 100vh; height: 100dvh;
     transform: scale(.985);
     background: var(--bg-deep); border: 1px solid var(--line); border-radius: 10px;
     box-shadow: var(--modal-shadow);
@@ -318,8 +333,35 @@
   }
   .drawer.open { transform: none; opacity: 1; pointer-events: auto; visibility: visible; }
   .drawer h2 { font: 500 21px/1.3 var(--serif); margin: 4px 0 6px; }
-  .drawer .close { position: absolute; top: 16px; right: 16px; color: var(--ink-faint); padding: 6px; }
-  .drawer .close:hover { color: var(--ink); }
+  .drawer .close, .reader .close { position: absolute; top: 16px; right: 16px; color: var(--ink-faint); padding: 6px; }
+  .drawer .close:hover, .reader .close:hover { color: var(--ink); }
+  /* ── markdown bodies (papers, reports, drawer abstract/notes) ── */
+  .md { white-space: normal; }
+  .md p { margin: 0 0 .9em; }
+  .md h1, .md h2 { font: 500 20px/1.3 var(--serif); margin: 1.4em 0 .5em; }
+  .md h3, .md h4, .md h5 { font: 500 17px/1.3 var(--serif); margin: 1.2em 0 .4em; }
+  .md ul, .md ol { margin: 0 0 .9em; padding-left: 1.5em; }
+  .md li { margin: .25em 0; }
+  .md code {
+    font: 12.5px var(--mono); background: var(--surface);
+    border: 1px solid var(--line-soft); border-radius: 4px; padding: 1px 5px;
+  }
+  .md pre {
+    background: var(--bg-deep); border: 1px solid var(--line);
+    border-radius: var(--r); padding: 10px 12px; margin: 0 0 .9em; overflow-x: auto;
+  }
+  .md pre code { background: none; border: none; padding: 0; font: 12.5px/1.6 var(--mono); }
+  .md blockquote { margin: 0 0 .9em; padding: 2px 14px; border-left: 3px solid var(--line); color: var(--ink-dim); }
+  .md table { width: auto; border-collapse: collapse; margin: 0 0 1em; }
+  .md th, .md td { border: 1px solid var(--line); padding: 5px 10px; font-size: 13px; text-align: left; }
+  .md img { max-width: 100%; border-radius: var(--r); }
+  .md hr { border: none; border-top: 1px solid var(--line); margin: 1.4em 0; }
+  .md a { color: var(--d5); }
+  .md .katex-display { overflow-x: auto; padding: 4px 0; }
+  .md pre.mermaid {
+    display: flex; justify-content: center; background: var(--surface);
+  }
+  .md pre.mermaid svg { max-width: 100%; height: auto; }
   .kv { width: 100%; margin: 6px 0; }
   .kv td { padding: 4px 0; border: none; vertical-align: top; }
   .kv td:first-child { color: var(--ink-faint); width: 96px; font-size: 12px; padding-top: 6px; }
@@ -328,21 +370,26 @@
   .drawer .sec .h { font-size: 12px; color: var(--ink-faint); margin-bottom: 8px; }
 
   /* ── report reading modal ── */
+  /* Same centred card language as the paper modal (.drawer): full viewport
+     height, dimmed page behind via the shared overlay, X button top-right.
+     .inner is a flex column so a PDF iframe fills the leftover height exactly. */
   .reader {
-    position: fixed; inset: 0; background: var(--bg); z-index: 50; display: none;
-    overflow-y: auto;
+    position: fixed; inset: 0; margin: auto;
+    width: min(760px, 92vw); height: 100vh; height: 100dvh;
+    background: var(--bg-deep); border: 1px solid var(--line); border-radius: 10px;
+    box-shadow: var(--modal-shadow);
+    z-index: 50; display: none;
+    overflow-y: auto; padding: 30px 34px 36px;
   }
   .reader.open { display: block; }
-  .reader .inner { max-width: 720px; margin: 0 auto; padding: 60px 28px 90px; }
-  .reader h1 { font-size: 30px; margin-bottom: 4px; }
-  .reader .meta { color: var(--ink-faint); font-size: 13px; margin-bottom: 34px; }
-  .reader h3 { font: 500 18px var(--serif); margin: 30px 0 10px; }
+  .reader .inner { display: flex; flex-direction: column; min-height: 100%; }
+  .reader h2 { font: 500 21px/1.3 var(--serif); margin: 4px 0 6px; }
+  .reader .meta { color: var(--ink-faint); font-size: 13px; margin-bottom: 26px; }
+  .reader h3 { font: 500 18px var(--serif); margin: 30px 0 10px; flex: none; }
   .reader .body { font: 400 15.5px/1.75 var(--serif); color: var(--read-body); max-width: 66ch; white-space: pre-wrap; }
   .reader .page-anchor { display: flex; align-items: center; gap: 12px; margin: 26px 0 14px; font: 500 11px var(--sans); letter-spacing: .08em; color: var(--ink-dim); }
-  .reader .pdf { width: 100%; height: calc(100vh - 60px); border: 1px solid var(--line); border-radius: var(--r); background: #525659; }
+  .reader .pdf { width: 100%; flex: 1; min-height: 0; border: 1px solid var(--line); border-radius: var(--r); background: #525659; }
   .reader .page-anchor::before, .reader .page-anchor::after { content: ""; flex: 1; height: 1px; background: var(--line-soft); }
-  .reader .exit { position: fixed; top: 18px; right: 22px; color: var(--ink-dim); border: 1px solid var(--line); border-radius: var(--r); padding: 6px 14px; font-size: 12.5px; background: var(--surface); }
-  .reader .exit:hover { color: var(--ink); }
 
   /* ── config ── */
   .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 18px 20px; margin-bottom: 14px; }
@@ -442,10 +489,8 @@
     /* Manual: command samples are pre-formatted and scroll on their own. */
     .manual pre { max-width: 100%; overflow-x: auto; }
     .panel, .manual div { min-width: 0; }
-    .drawer { padding: 22px 18px 28px; max-height: 90vh; width: 94vw; }
-    .drawer h2 { font-size: 18px; }
-    .reader .inner { padding: 48px 16px 70px; }
-    .reader h1 { font-size: 23px; }
+    .drawer, .reader { padding: 22px 18px 28px; width: 94vw; }
+    .drawer h2, .reader h2 { font-size: 18px; }
   }
 
   /* Long unbroken strings (DOIs, paths, ids) must not widen the page. */
@@ -484,6 +529,34 @@
   .iconbtn:hover { color: var(--ink); border-color: var(--line); background: var(--surface); }
   .iconbtn svg { width: 16px; height: 16px; flex: none; }
   .iconbtn.wide { width: auto; padding: 0 9px; letter-spacing: .02em; }
+  /* ── language dropdown ── */
+  .actions { display: flex; gap: 6px; align-items: center; }
+  #slot-side { padding: 12px 22px 14px; }
+  .lang { position: relative; }
+  .lang-menu {
+    position: absolute; top: calc(100% + 6px); right: 0; min-width: 168px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+    box-shadow: var(--modal-shadow); padding: 5px; z-index: 70;
+    display: none;
+  }
+  .lang-menu.open { display: block; }
+  .lang-menu button {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    padding: 6px 10px; border-radius: 5px; font-size: 13px;
+    color: var(--ink-dim); text-align: left;
+  }
+  .lang-menu button:hover { background: var(--surface-2); color: var(--ink); }
+  .lang-menu button[aria-selected="true"] { color: var(--ink); background: var(--surface-2); }
+  .lang-menu button[aria-selected="true"]::after {
+    content: ""; margin-left: auto; width: 8px; height: 5px;
+    border-left: 1.6px solid var(--d5); border-bottom: 1.6px solid var(--d5);
+    transform: rotate(-45deg) translateY(-1px);
+  }
+  .lang-menu button .lg-code {
+    margin-left: auto; font: 10px var(--mono); color: var(--ink-faint);
+    text-transform: uppercase;
+  }
+  .lang-menu button[aria-selected="true"] .lg-code { display: none; }
 </style>
 </head>
 <body>
@@ -495,6 +568,9 @@
       <div class="s">local research desk</div>
     </div>
     <nav id="nav"></nav>
+    <!-- Desktop: the lang/theme/github cluster lives here, just above the
+         status block. On mobile the JS moves it back into the topbar. -->
+    <div id="slot-side"></div>
     <div class="side-foot">
       <div class="row" title="database path"><span class="dot ok"></span><span class="mono" id="foot-db" style="overflow:hidden;text-overflow:ellipsis"></span></div>
       <div class="row" id="foot-llm"><span class="dot dim2"></span><span>LLM not configured</span></div>
@@ -506,11 +582,7 @@
     </button>
     <span class="tb-title" id="tb-title"></span>
     <span class="spacer"></span>
-    <button class="iconbtn wide" id="lang-toggle" aria-label="Language"></button>
-    <button class="iconbtn" id="theme-toggle" aria-label="Theme"></button>
-    <a class="iconbtn" href="https://github.com/epicsagas/research-agent" target="_blank" rel="noopener" aria-label="GitHub">
-      <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
-    </a>
+    <span id="slot-topbar"></span>
   </div>
   <main id="main"><div class="skel w40"></div><div class="skel w80"></div><div class="skel w60"></div></main>
 </div>
@@ -532,12 +604,64 @@ const nfmt = n => (n ?? 0).toLocaleString("en-US");
 const pct = f => (100 * (f || 0)).toFixed(0);
 const day = iso => (iso || "").slice(0, 10);
 const clock = iso => (iso || "").slice(11, 16);
-const title_ = s => s.replace(/\b\w/g, c => c.toUpperCase());
+/* t() + {var} substitution: fmt("cap_depth", {n: 3}) */
+const fmt = (key, vars) => t(key).replace(/\{(\w+)\}/g, (m, k) => (vars && k in vars) ? vars[k] : m);
 
 const DEPTHS = ["discovered","abstract_read","skimmed","read","deep_read"];
 const READS = ["unread","queued","in_progress","completed","abandoned"];
-const DEPTH_LABEL = {discovered:"Discovered","abstract_read":"Abstract read",skimmed:"Skimmed",read:"Read","deep_read":"Deep read"};
-const READ_LABEL = {unread:"Unread",queued:"Queued","in_progress":"In progress",completed:"Completed",abandoned:"Abandoned"};
+/* stage / type labels are language-keyed: DL[LANG].read -> "Read" | "읽음" */
+const DL = {
+  en:{discovered:"Discovered","abstract_read":"Abstract read",skimmed:"Skimmed",read:"Read","deep_read":"Deep read"},
+  ko:{discovered:"발견","abstract_read":"초록 읽음",skimmed:"훑어봄",read:"읽음","deep_read":"정독"},
+  ja:{discovered:"発見","abstract_read":"要約を読んだ",skimmed:"流し読み",read:"読んだ","deep_read":"精読"},
+  "zh-Hans":{discovered:"已发现","abstract_read":"读过摘要",skimmed:"略读",read:"读过","deep_read":"精读"},
+  "zh-Hant":{discovered:"已發現","abstract_read":"讀過摘要",skimmed:"略讀",read:"讀過","deep_read":"精讀"},
+  es:{discovered:"Descubierto","abstract_read":"Resumen leído",skimmed:"Ojeado",read:"Leído","deep_read":"Leído a fondo"},
+  fr:{discovered:"Découvert","abstract_read":"Résumé lu",skimmed:"Parcouru",read:"Lu","deep_read":"Lu en profondeur"},
+  de:{discovered:"Entdeckt","abstract_read":"Abstract gelesen",skimmed:"Überflogen",read:"Gelesen","deep_read":"Tief gelesen"},
+  pt:{discovered:"Descoberto","abstract_read":"Resumo lido",skimmed:"Folheado",read:"Lido","deep_read":"Lido a fundo"},
+  ru:{discovered:"Найдена","abstract_read":"Аннотация прочитана",skimmed:"Просмотрена",read:"Прочитана","deep_read":"Изучена глубоко"},
+  it:{discovered:"Trovato","abstract_read":"Abstract letto",skimmed:"Sfogliato",read:"Letto","deep_read":"Letto a fondo"},
+};
+const RL = {
+  en:{unread:"Unread",queued:"Queued","in_progress":"In progress",completed:"Completed",abandoned:"Abandoned"},
+  ko:{unread:"읽기 전",queued:"읽을 예정","in_progress":"읽는 중",completed:"다 읽음",abandoned:"중단"},
+  ja:{unread:"未読",queued:"読む予定","in_progress":"読んでいる最中",completed:"読了",abandoned:"中断"},
+  "zh-Hans":{unread:"未读",queued:"待读","in_progress":"阅读中",completed:"已读完",abandoned:"中途放弃"},
+  "zh-Hant":{unread:"未讀",queued:"待讀","in_progress":"閱讀中",completed:"已讀完",abandoned:"中途放棄"},
+  es:{unread:"Sin leer",queued:"En cola","in_progress":"Leyendo",completed:"Terminado",abandoned:"Abandonado"},
+  fr:{unread:"Non lu",queued:"En file","in_progress":"En cours",completed:"Terminé",abandoned:"Abandonné"},
+  de:{unread:"Ungelesen",queued:"Vorgemerkt","in_progress":"Wird gelesen",completed:"Durchgelesen",abandoned:"Abgebrochen"},
+  pt:{unread:"Não lido",queued:"Na fila","in_progress":"Lendo",completed:"Concluído",abandoned:"Abandonado"},
+  ru:{unread:"Не прочитана",queued:"В очереди","in_progress":"Читаю",completed:"Прочитана",abandoned:"Брошена"},
+  it:{unread:"Da leggere",queued:"In coda","in_progress":"In lettura",completed:"Letto tutto",abandoned:"Abbandonato"},
+};
+const GL = {
+  en:{missing_literature:"Missing literature",unanswered_question:"Unanswered question",methodology_gap:"Methodology gap",connection_gap:"Connection gap"},
+  ko:{missing_literature:"문헌 부족",unanswered_question:"미해결 질문",methodology_gap:"방법론 갭",connection_gap:"연결 갭"},
+  ja:{missing_literature:"文献の不足",unanswered_question:"未解決の問い",methodology_gap:"手法のギャップ",connection_gap:"つながりのギャップ"},
+  "zh-Hans":{missing_literature:"文献缺失",unanswered_question:"尚无答案的问题",methodology_gap:"方法缺口",connection_gap:"关联缺口"},
+  "zh-Hant":{missing_literature:"文獻缺失",unanswered_question:"尚無答案的問題",methodology_gap:"方法缺口",connection_gap:"關聯缺口"},
+  es:{missing_literature:"Falta literatura",unanswered_question:"Pregunta sin responder",methodology_gap:"Laguna de método",connection_gap:"Falta de conexión"},
+  fr:{missing_literature:"Littérature manquante",unanswered_question:"Question sans réponse",methodology_gap:"Écart de méthode",connection_gap:"Écart de liaison"},
+  de:{missing_literature:"Fehlende Literatur",unanswered_question:"Offene Frage",methodology_gap:"Methodenlücke",connection_gap:"Verbindungslücke"},
+  pt:{missing_literature:"Falta de literatura",unanswered_question:"Pergunta sem resposta",methodology_gap:"Lacuna de método",connection_gap:"Lacuna de conexão"},
+  ru:{missing_literature:"Не хватает литературы",unanswered_question:"Открытый вопрос",methodology_gap:"Пробел в методологии",connection_gap:"Пробел связей"},
+  it:{missing_literature:"Letteratura mancante",unanswered_question:"Domanda senza risposta",methodology_gap:"Lacuna di metodo",connection_gap:"Lacuna di collegamento"},
+};
+const SL = {
+  en:{papers:"Papers",gaps:"Gaps",reports:"Reports"},
+  ko:{papers:"논문",gaps:"갭",reports:"리포트"},
+  ja:{papers:"論文",gaps:"ギャップ",reports:"レポート"},
+  "zh-Hans":{papers:"论文",gaps:"缺口",reports:"报告"},
+  "zh-Hant":{papers:"論文",gaps:"缺口",reports:"報告"},
+  es:{papers:"Artículos",gaps:"Lagunas",reports:"Informes"},
+  fr:{papers:"Articles",gaps:"Écarts",reports:"Rapports"},
+  de:{papers:"Artikel",gaps:"Lücken",reports:"Berichte"},
+  pt:{papers:"Artigos",gaps:"Lacunas",reports:"Relatórios"},
+  ru:{papers:"Статьи",gaps:"Пробелы",reports:"Отчёты"},
+  it:{papers:"Articoli",gaps:"Lacune",reports:"Rapporti"},
+};
 /* sequential amber ramp, one per depth stage */
 const DEPTH_COLOR = ["#52400F","#7A5E14","#A67D1B","#D09E24","#F0BE3A"];
 /* categorical, fixed order: papers stream, gaps stream, reports stream */
@@ -567,14 +691,53 @@ function toast(msg, isErr) {
   setTimeout(() => t.remove(), 3400);
 }
 async function copyText(text, label) {
-  try { await navigator.clipboard.writeText(text); toast(label + " copied"); }
-  catch { toast("Copy failed — select it manually", true); }
+  try { await navigator.clipboard.writeText(text); toast(label + " " + t("copied")); }
+  catch { toast(t("copy_failed"), true); }
 }
 async function api(path, opts) {
   const r = await fetch(path, opts);
   const body = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(body.error || (path + " failed (" + r.status + ")"));
   return body;
+}
+
+/* ───────────────────────── rich text ───────────────────────── */
+/* markdown + KaTeX + mermaid as progressive enhancement: when the CDN libs
+   are absent (offline), everything degrades to escaped plain text. */
+const mdActive = () => !!(window.marked && window.DOMPurify);
+/* inline spans: titles, descriptions, snippets — no block elements */
+function mdInline(text) {
+  const s = String(text ?? "");
+  return s ? (mdActive() ? DOMPurify.sanitize(marked.parseInline(s)) : esc(s)) : "";
+}
+/* block bodies: paper texts, report sections — full markdown */
+function mdBlock(text) {
+  const s = String(text ?? "");
+  return s ? (mdActive() ? DOMPurify.sanitize(marked.parse(s, { breaks: true })) : esc(s)) : "";
+}
+/* class suffix for containers whose content went through mdBlock */
+const mdCls = () => (mdActive() ? " md" : "");
+/* math ($…$, $$…$$, \(…\), \[…\]) + ```mermaid fences on a rendered node */
+function enhance(el) {
+  if (!el) return;
+  if (window.renderMathInElement) {
+    renderMathInElement(el, { delimiters: [
+      { left: "$$", right: "$$", display: true },
+      { left: "$", right: "$", display: false },
+      { left: "\\[", right: "\\]", display: true },
+      { left: "\\(", right: "\\)", display: false },
+    ]});
+  }
+  if (window.mermaid) {
+    el.querySelectorAll("pre > code.language-mermaid, pre > code.lang-mermaid").forEach(code => {
+      const div = document.createElement("pre");
+      div.className = "mermaid";
+      div.textContent = code.textContent;
+      code.parentElement.replaceWith(div);
+    });
+    const diagrams = el.querySelectorAll("pre.mermaid");
+    if (diagrams.length) mermaid.run({ nodes: diagrams }).catch(() => {});
+  }
 }
 
 /* ───────────────────────── state & router ───────────────────────── */
@@ -600,35 +763,953 @@ const I18N = {
     nav_overview:"Overview", nav_papers:"Papers", nav_pipeline:"Pipeline",
     nav_history:"History", nav_results:"Results", nav_config:"Config", nav_manual:"Manual",
     tagline:"local research desk",
-    papers:"papers", topics:"topics", gaps:"gaps", reports:"reports", events:"events",
-    of_shown:"of", shown:"shown", all:"All",
-    unread:"Unread", queued:"Queued", in_progress:"In progress",
-    completed:"Completed", abandoned:"Abandoned",
-    title:"Title", year:"Year", status:"Status", rating:"Rating", relevance:"Relevance",
+    menu:"Menu", paper_detail:"Paper detail", report_detail:"Report",
+    all:"All", all_topics:"All topics", none_yet:"none yet",
+    close:"Close", read_btn:"Read", read_paper:"Read paper", open_paper:"Open paper",
+    search_ph:"Search title, author, tag", scope_topic:"Scope to one topic",
+    sort_recent:"Recently added", sort_relevance:"Relevance", sort_rating:"Rating", sort_title:"Title",
+    col_depth:"Depth", col_paper:"Paper", col_reading:"Reading",
+    col_rating:"Rating", col_relevance:"Relevance",
+    col_priority:"Priority", col_desc:"Description", col_topic:"Topic",
+    col_type:"Type", col_found:"Found",
+    t_papers:"Papers", t_completed:"Completed", t_gaps:"Gaps", t_reports:"Reports", t_avgcov:"Avg coverage",
+    cap_depth:"{n} read at depth",
+    cap_completed:"{p}% of library · {n} queued",
+    cap_gaps:"{n} high priority",
+    cap_topics:"{n} topics tracked",
+    sec_depth:"Reading depth", sec_reading:"Reading pipeline", sec_coverage:"Topic coverage",
+    sec_stage:"Stage detail", sec_topics:"Topics", sec_gaps:"Knowledge gaps", sec_reports:"Reports",
+    ov_sub:"{p} papers across {t} topics",
+    pipe_sub:"how papers move from discovery to deep reading",
+    hist_sub:"{n} events", res_sub:"{g} gaps · {r} reports · {t} topics",
+    conv:"{p}% advance to {next}",
+    conv_aband:"{n} abandoned along the way",
+    stage_depth:"Depth", stage_reading:"Reading",
+    topic_read:"{n} read · {m} queued", topic_none:"no analysis yet", topic_gaps:"{n} gaps",
+    shown_count:"{n} of {m} shown",
+    no_match_h:"Nothing matches", no_match_p:"Clear the search or pick another filter.",
+    topics_filter_ph:"Filter topics",
+    sort_name:"By name", sort_coverage:"By coverage", sort_gaps:"By gaps",
+    no_topics_match:"No topics match.",
+    show_subs:"Show {n} sub-topics",
+    no_topics:"No topics yet — create one from the command line.",
+    scope_gaps:"Scope gaps to one topic", scope_gaps_btn:"Scope gaps to this topic",
+    no_gaps:"No gaps recorded — run gap analysis on a topic.", no_gaps_topic:"No gaps for this topic.",
+    rep_meta:"{n} sections · {d}",
+    show_all_reps:"Show all {n} reports",
+    no_reports:"No reports yet — generate one for a topic.",
+    no_activity_h:"No activity yet", no_activity_p:"Ingest papers and run analysis to build a history.",
+    ev_topic:"topic {id}",
+    report_sections:"{n} sections", report_no_sections:"This report has no sections stored.",
+    reader_loading:"Loading…",
+    et_al:"et al.",
     reading_progress:"Reading progress", tags:"Tags", notes:"Notes",
-    added:"Added", updated:"Updated", id:"ID", close:"Close", read_paper:"Read paper",
+    added:"Added", updated:"Updated", id:"ID",
+    publisher:"Publisher",
+    rate:"Rate {n}", depth_title:"Depth: {x}", read_status_aria:"Reading status",
+    moved:"Moved to {x}", rated:"Rated {n} of 5", rating_cleared:"Rating cleared",
     llm_not_configured:"LLM not configured", llm_configured:"LLM configured",
-    sort_recent:"Recently added", theme_light:"Light", theme_dark:"Dark",
-    no_activity:"No activity yet", sections:"sections",
+    theme_light:"Light", theme_dark:"Dark",
+    cfg_sub:"workspace settings — saved to <span class=\"mono\">~/.research/config.toml</span>",
+    cfg_alert:"<b>{env}</b> is not set in this shell. Export it, then restart the dashboard so the CLI tools pick it up too.",
+    cfg_llm_desc:"Used by gap analysis and report generation. The key itself stays in your environment — only its name is stored.",
+    cfg_provider:"Provider", cfg_model:"Model", cfg_env:"API key env",
+    cfg_base:"Base URL", cfg_base_hint:"(OpenAI-compatible; blank = provider default)",
+    cfg_load_models:"Load model list", cfg_save:"Save LLM settings", cfg_remove:"Remove",
+    key_ok:"key resolved", key_missing:"key missing from environment", key_unset:"not configured",
+    p_llm:"LLM", p_workspace:"Workspace", p_server:"Dashboard server",
+    ws_desc:"Where the library database lives. Takes effect when the dashboard restarts.",
+    ws_db:"Database file",
+    srv_desc:"Serving on <span class=\"mono\">{host}</span>. Exposing to the network requires the access token below; MCP is unaffected — it runs over stdio inside your agent process and never opens a port.",
+    srv_bind:"Bind address", srv_local:"localhost only",
+    srv_net:"0.0.0.0 — network (token required)", srv_port:"Port",
+    srv_token:"Access token", srv_token_gen:"(generated on network bind)",
+    srv_token_none:"(none — localhost only)",
+    srv_save:"Save settings", srv_restart:"Save &amp; restart dashboard",
+    toast_required:"Provider, model, and key name are all required",
+    toast_llm_saved:"LLM settings saved", toast_llm_removed:"LLM settings removed",
+    toast_db_required:"Database path is required",
+    loading_models:"loading models…", models_loaded:"{n} models loaded",
+    restarting:"restarting…",
+    restart_fail:"Dashboard did not come back — start it manually with `research dashboard`",
+    copied:"copied", copy_failed:"Copy failed — select it manually",
+    err_api:"Could not reach the dashboard API.", srv_unreachable:"server unreachable",
+    onb_h:"Welcome", onb_sub:"your workspace is empty — three commands to a first survey",
+    onb_h2:"Start your library",
+    onb_p:"research-agent indexes papers, tracks what you've read, and finds what you've missed.",
+    onb_s1:"Add a topic you care about",
+    onb_s2:"Pull papers in from arXiv or Semantic Scholar",
+    onb_s3:"Find your gaps, then generate a report",
+    onb_foot:"This dashboard refreshes as the CLI works",
+    onb_foot_llm:" — and once an LLM is configured, gap analysis and reports come alive",
+    manual_sub:"driving research-agent from the terminal and from this desk",
   },
   ko: {
     nav_overview:"개요", nav_papers:"논문", nav_pipeline:"파이프라인",
-    nav_history:"기록", nav_results:"결과", nav_config:"설정", nav_manual:"안내서",
+    nav_history:"기록", nav_results:"결과", nav_config:"설정", nav_manual:"매뉴얼",
     tagline:"로컬 연구 데스크",
-    papers:"편", topics:"주제", gaps:"공백", reports:"보고서", events:"건",
-    of_shown:"중", shown:"표시", all:"전체",
-    unread:"안 읽음", queued:"읽을 예정", in_progress:"읽는 중",
-    completed:"다 읽음", abandoned:"중단",
-    title:"제목", year:"연도", status:"상태", rating:"평점", relevance:"관련도",
-    reading_progress:"읽기 진행", tags:"태그", notes:"메모",
-    added:"추가", updated:"수정", id:"ID", close:"닫기", read_paper:"본문 보기",
+    menu:"메뉴", paper_detail:"논문 상세", report_detail:"리포트",
+    all:"전체", all_topics:"전체 주제", none_yet:"아직 없음",
+    close:"닫기", read_btn:"보기", read_paper:"본문 보기", open_paper:"원문 열기",
+    search_ph:"제목·저자·태그 검색", scope_topic:"특정 주제만 보기",
+    sort_recent:"최근 추가순", sort_relevance:"관련도", sort_rating:"평점", sort_title:"제목",
+    col_depth:"깊이", col_paper:"논문", col_reading:"상태",
+    col_rating:"평점", col_relevance:"관련도",
+    col_priority:"우선순위", col_desc:"설명", col_topic:"주제",
+    col_type:"유형", col_found:"발견일",
+    t_papers:"논문", t_completed:"완료", t_gaps:"갭", t_reports:"리포트", t_avgcov:"평균 커버리지",
+    cap_depth:"정독 {n}편",
+    cap_completed:"전체의 {p}% · 읽을 예정 {n}편",
+    cap_gaps:"우선순위 높은 갭 {n}건",
+    cap_topics:"추적 중인 주제 {n}개",
+    sec_depth:"읽은 정도", sec_reading:"읽기 파이프라인", sec_coverage:"주제 커버리지",
+    sec_stage:"단계별 현황", sec_topics:"주제", sec_gaps:"지식 갭", sec_reports:"리포트",
+    ov_sub:"논문 {p}편 · 주제 {t}개",
+    pipe_sub:"발견부터 정독까지 논문이 거치는 단계",
+    hist_sub:"이벤트 {n}건", res_sub:"갭 {g}개 · 리포트 {r}개 · 주제 {t}개",
+    conv:"{next} 단계로 {p}%",
+    conv_aband:"중간에 중단된 논문 {n}건",
+    stage_depth:"읽은 정도", stage_reading:"읽기 상태",
+    topic_read:"읽음 {n} · 예정 {m}", topic_none:"아직 분석 전", topic_gaps:"갭 {n}개",
+    shown_count:"{m}편 중 {n}편 표시",
+    no_match_h:"맞는 논문이 없습니다", no_match_p:"검색어를 지우거나 다른 필터를 골라 보세요.",
+    topics_filter_ph:"주제 필터",
+    sort_name:"이름순", sort_coverage:"커버리지순", sort_gaps:"갭 많은순",
+    no_topics_match:"맞는 주제가 없습니다.",
+    show_subs:"하위 주제 {n}개 더 보기",
+    no_topics:"아직 주제가 없습니다 — CLI에서 만들어 보세요.",
+    scope_gaps:"특정 주제의 갭만 보기", scope_gaps_btn:"이 주제의 갭만 보기",
+    no_gaps:"기록된 갭이 없습니다 — 주제에 대해 갭 분석을 실행해 보세요.", no_gaps_topic:"이 주제에는 갭이 없습니다.",
+    rep_meta:"섹션 {n}개 · {d}",
+    show_all_reps:"리포트 {n}개 모두 보기",
+    no_reports:"아직 리포트가 없습니다 — 주제를 정해 생성해 보세요.",
+    no_activity_h:"아직 활동이 없습니다", no_activity_p:"논문을 수집하고 분석을 돌리면 기록이 쌓입니다.",
+    ev_topic:"주제 {id}",
+    report_sections:"섹션 {n}개", report_no_sections:"저장된 섹션이 없습니다.",
+    reader_loading:"불러오는 중…",
+    et_al:"외",
+    reading_progress:"읽기 상태 · 평점", tags:"태그", notes:"메모",
+    added:"추가한 날", updated:"마지막 수정", id:"ID",
+    publisher:"출판사 페이지",
+    rate:"{n}점으로 평가", depth_title:"읽은 정도: {x}", read_status_aria:"읽기 상태",
+    moved:"상태 변경: {x}", rated:"별점 {n}점", rating_cleared:"별점을 지웠습니다",
     llm_not_configured:"LLM 미설정", llm_configured:"LLM 설정됨",
-    sort_recent:"최근 추가순", theme_light:"라이트", theme_dark:"다크",
-    no_activity:"아직 활동 없음", sections:"개 섹션",
+    theme_light:"라이트", theme_dark:"다크",
+    cfg_sub:"워크스페이스 설정 — <span class=\"mono\">~/.research/config.toml</span>에 저장됩니다",
+    cfg_alert:"<b>{env}</b> 환경변수가 이 셸에 없습니다. 내보낸 뒤 대시보드를 재시작하면 CLI에서도 인식합니다.",
+    cfg_llm_desc:"갭 분석과 리포트 생성에 사용됩니다. 키 값은 환경 변수에 그대로 두고 이름만 저장합니다.",
+    cfg_provider:"프로바이더", cfg_model:"모델", cfg_env:"API 키 환경변수",
+    cfg_base:"Base URL", cfg_base_hint:"(OpenAI 호환 · 빈 칸이면 기본값 사용)",
+    cfg_load_models:"모델 목록 불러오기", cfg_save:"LLM 설정 저장", cfg_remove:"설정 삭제",
+    key_ok:"키 있음", key_missing:"환경에 키 없음", key_unset:"미설정",
+    p_llm:"LLM", p_workspace:"워크스페이스", p_server:"대시보드 서버",
+    ws_desc:"라이브러리 데이터베이스 위치입니다. 대시보드 재시작 시 적용됩니다.",
+    ws_db:"데이터베이스 파일",
+    srv_desc:"<span class=\"mono\">{host}</span>에서 서빙 중입니다. 외부 네트워크에 열려면 아래 접근 토큰이 필요합니다. MCP는 포트를 열지 않고 에이전트 프로세스 안에서 stdio로 동작하므로 영향이 없습니다.",
+    srv_bind:"바인드 주소", srv_local:"로컬 전용 (localhost)",
+    srv_net:"0.0.0.0 — 외부 네트워크 (토큰 필요)", srv_port:"포트",
+    srv_token:"접근 토큰", srv_token_gen:"(네트워크 바인드 시 자동 생성)",
+    srv_token_none:"(없음 — 로컬 전용)",
+    srv_save:"설정 저장", srv_restart:"저장 후 대시보드 재시작",
+    toast_required:"프로바이더·모델·키 이름을 모두 입력해 주세요",
+    toast_llm_saved:"LLM 설정을 저장했습니다", toast_llm_removed:"LLM 설정을 삭제했습니다",
+    toast_db_required:"데이터베이스 경로를 입력해 주세요",
+    loading_models:"모델 목록을 불러오는 중…", models_loaded:"모델 {n}개를 불러왔습니다",
+    restarting:"재시작하는 중…",
+    restart_fail:"대시보드가 돌아오지 않습니다 — `research dashboard`를 직접 실행해 주세요",
+    copied:"복사됨", copy_failed:"복사에 실패했습니다 — 직접 선택해 복사해 주세요",
+    err_api:"대시보드 API에 연결할 수 없습니다.", srv_unreachable:"서버에 연결할 수 없습니다",
+    onb_h:"시작하기", onb_sub:"워크스페이스가 비어 있습니다 — 명령 세 줄로 첫 조사를 시작해 보세요",
+    onb_h2:"라이브러리 만들기",
+    onb_p:"research-agent는 논문을 색인하고, 읽은 것을 기록하고, 놓친 부분을 찾아줍니다.",
+    onb_s1:"관심 주제 추가하기",
+    onb_s2:"arXiv·Semantic Scholar에서 논문 가져오기",
+    onb_s3:"갭을 찾아 리포트로 정리하기",
+    onb_foot:"CLI가 작업하면 대시보드도 따라 갱신됩니다",
+    onb_foot_llm:" — LLM을 설정하면 갭 분석과 리포트가 동작합니다",
+    manual_sub:"터미널과 대시보드에서 research-agent 사용하기",
+  },
+  ja: {
+    nav_overview:"概要", nav_papers:"論文", nav_pipeline:"パイプライン",
+    nav_history:"履歴", nav_results:"結果", nav_config:"設定", nav_manual:"マニュアル",
+    tagline:"ローカル研究デスク",
+    menu:"メニュー", paper_detail:"論文の詳細", report_detail:"レポート",
+    all:"すべて", all_topics:"すべてのトピック", none_yet:"まだありません",
+    close:"閉じる", read_btn:"表示", read_paper:"本文を読む", open_paper:"原文を開く",
+    search_ph:"タイトル・著者・タグを検索", scope_topic:"特定のトピックだけ表示",
+    sort_recent:"追加が新しい順", sort_relevance:"関連度", sort_rating:"評価", sort_title:"タイトル",
+    col_depth:"深度", col_paper:"論文", col_reading:"状態",
+    col_rating:"評価", col_relevance:"関連度",
+    col_priority:"優先度", col_desc:"説明", col_topic:"トピック",
+    col_type:"種類", col_found:"発見日",
+    t_papers:"論文", t_completed:"読了", t_gaps:"ギャップ", t_reports:"レポート", t_avgcov:"平均カバレッジ",
+    cap_depth:"精読 {n}本",
+    cap_completed:"全体の {p}% · 待ち {n}本",
+    cap_gaps:"優先度の高いギャップ {n}件",
+    cap_topics:"追跡中のトピック {n}件",
+    sec_depth:"読みの深度", sec_reading:"読書パイプライン", sec_coverage:"トピックのカバレッジ",
+    sec_stage:"段階ごとの内訳", sec_topics:"トピック", sec_gaps:"知識ギャップ", sec_reports:"レポート",
+    ov_sub:"論文 {p}本 · トピック {t}件",
+    pipe_sub:"発見から精読まで、論文がたどる流れ",
+    hist_sub:"イベント {n}件", res_sub:"ギャップ {g}件 · レポート {r}本 · トピック {t}件",
+    conv:"次の「{next}」へ {p}%",
+    conv_aband:"途中で中断した論文 {n}本",
+    stage_depth:"読みの深度", stage_reading:"読書状態",
+    topic_read:"既読 {n} · 待ち {m}", topic_none:"まだ解析なし", topic_gaps:"ギャップ {n}件",
+    shown_count:"{m}本中 {n}本を表示",
+    no_match_h:"該当する論文がありません", no_match_p:"検索語を消すか、別のフィルターを試してください。",
+    topics_filter_ph:"トピックを絞り込み",
+    sort_name:"名前順", sort_coverage:"カバレッジ順", sort_gaps:"ギャップが多い順",
+    no_topics_match:"該当するトピックがありません。",
+    show_subs:"サブトピック {n}件を表示",
+    no_topics:"トピックがまだありません — CLIで作成してください。",
+    scope_gaps:"特定トピックのギャップだけ表示", scope_gaps_btn:"このトピックのギャップだけ表示",
+    no_gaps:"記録されたギャップはありません — トピックに対してギャップ分析を実行してください。", no_gaps_topic:"このトピックにギャップはありません。",
+    rep_meta:"セクション {n}個 · {d}",
+    show_all_reps:"レポート {n}本をすべて表示",
+    no_reports:"レポートはまだありません — トピックを指定して生成してください。",
+    no_activity_h:"まだ履歴がありません", no_activity_p:"論文を取り込み解析すれば、ここに記録が積もります。",
+    ev_topic:"トピック {id}",
+    report_sections:"セクション {n}個", report_no_sections:"保存されたセクションがありません。",
+    reader_loading:"読み込み中…",
+    et_al:"ほか",
+    reading_progress:"読書状態 · 評価", tags:"タグ", notes:"メモ",
+    added:"追加日", updated:"最終更新", id:"ID",
+    publisher:"出版社ページ",
+    rate:"{n}点で評価", depth_title:"読みの深度: {x}", read_status_aria:"読書状態",
+    moved:"状態を「{x}」に変更", rated:"評価 {n}点", rating_cleared:"評価を消しました",
+    llm_not_configured:"LLM未設定", llm_configured:"LLM設定済み",
+    theme_light:"ライト", theme_dark:"ダーク",
+    cfg_sub:"ワークスペース設定 — <span class=\"mono\">~/.research/config.toml</span> に保存されます",
+    cfg_alert:"<b>{env}</b> がこのシェルにありません。エクスポートしてダッシュボードを再起動すれば、CLI側にも反映されます。",
+    cfg_llm_desc:"ギャップ分析とレポート生成で使用します。キー本体は環境変数に残し、名前だけを保存します。",
+    cfg_provider:"プロバイダー", cfg_model:"モデル", cfg_env:"APIキーの環境変数",
+    cfg_base:"Base URL", cfg_base_hint:"(OpenAI互換 · 空欄ならデフォルト)",
+    cfg_load_models:"モデル一覧を取得", cfg_save:"LLM設定を保存", cfg_remove:"設定を削除",
+    key_ok:"キーあり", key_missing:"環境変数にキーなし", key_unset:"未設定",
+    p_llm:"LLM", p_workspace:"ワークスペース", p_server:"ダッシュボードサーバー",
+    ws_desc:"ライブラリのデータベースの場所です。反映はダッシュボード再起動後です。",
+    ws_db:"データベースファイル",
+    srv_desc:"<span class=\"mono\">{host}</span> で待ち受けています。外部ネットワークに公開するには下のアクセストークンが必要です。MCPはポートを開かずエージェントプロセス内のstdioで動くため影響ありません。",
+    srv_bind:"バインドアドレス", srv_local:"ローカルのみ (localhost)",
+    srv_net:"0.0.0.0 — ネットワーク公開 (トークン必須)", srv_port:"ポート",
+    srv_token:"アクセストークン", srv_token_gen:"(ネットワークバインド時に自動生成)",
+    srv_token_none:"(なし — ローカルのみ)",
+    srv_save:"設定を保存", srv_restart:"保存してダッシュボードを再起動",
+    toast_required:"プロバイダー・モデル・キー名はすべて必須です",
+    toast_llm_saved:"LLM設定を保存しました", toast_llm_removed:"LLM設定を削除しました",
+    toast_db_required:"データベースのパスは必須です",
+    loading_models:"モデル一覧を取得中…", models_loaded:"モデル {n}件を取得しました",
+    restarting:"再起動中…",
+    restart_fail:"ダッシュボードが戻ってきません — `research dashboard` を手動で実行してください",
+    copied:"コピーしました", copy_failed:"コピーできませんでした — 手動で選択してください",
+    err_api:"ダッシュボードAPIに接続できません。", srv_unreachable:"サーバーに接続できません",
+    onb_h:"はじめに", onb_sub:"ワークスペースが空です — コマンド3つで最初のサーベイを始めましょう",
+    onb_h2:"ライブラリを作る",
+    onb_p:"research-agentは論文を索引化し、読んだ記録を残し、読み漏れを見つけ出します。",
+    onb_s1:"関心のあるトピックを追加",
+    onb_s2:"arXivやSemantic Scholarから論文を取り込む",
+    onb_s3:"ギャップを見つけてレポートにまとめる",
+    onb_foot:"CLIが動くとダッシュボードも自動で更新されます",
+    onb_foot_llm:" — LLMを設定すればギャップ分析とレポートが動きます",
+    manual_sub:"ターミナルとダッシュボードからresearch-agentを使う",
+  },
+  "zh-Hans": {
+    nav_overview:"概览", nav_papers:"论文", nav_pipeline:"流水线",
+    nav_history:"历史", nav_results:"结果", nav_config:"设置", nav_manual:"手册",
+    tagline:"本地研究台",
+    menu:"菜单", paper_detail:"论文详情", report_detail:"报告",
+    all:"全部", all_topics:"全部主题", none_yet:"暂无",
+    close:"关闭", read_btn:"查看", read_paper:"阅读正文", open_paper:"打开原文",
+    search_ph:"搜索标题、作者、标签", scope_topic:"只看某个主题",
+    sort_recent:"最近添加", sort_relevance:"相关度", sort_rating:"评分", sort_title:"标题",
+    col_depth:"深度", col_paper:"论文", col_reading:"状态",
+    col_rating:"评分", col_relevance:"相关度",
+    col_priority:"优先级", col_desc:"描述", col_topic:"主题",
+    col_type:"类型", col_found:"发现日期",
+    t_papers:"论文", t_completed:"已读完", t_gaps:"缺口", t_reports:"报告", t_avgcov:"平均覆盖率",
+    cap_depth:"精读 {n} 篇",
+    cap_completed:"占全库 {p}% · 待读 {n} 篇",
+    cap_gaps:"高优先级缺口 {n} 个",
+    cap_topics:"跟踪中的主题 {n} 个",
+    sec_depth:"阅读深度", sec_reading:"阅读流水线", sec_coverage:"主题覆盖率",
+    sec_stage:"各阶段明细", sec_topics:"主题", sec_gaps:"知识缺口", sec_reports:"报告",
+    ov_sub:"论文 {p} 篇 · 主题 {t} 个",
+    pipe_sub:"论文从发现到精读的完整路径",
+    hist_sub:"{n} 条事件", res_sub:"缺口 {g} 个 · 报告 {r} 篇 · 主题 {t} 个",
+    conv:"{p}% 进入「{next}」",
+    conv_aband:"中途放弃 {n} 篇",
+    stage_depth:"阅读深度", stage_reading:"阅读状态",
+    topic_read:"已读 {n} · 待读 {m}", topic_none:"尚未分析", topic_gaps:"缺口 {n} 个",
+    shown_count:"显示 {n} / {m} 篇",
+    no_match_h:"没有匹配的论文", no_match_p:"清空搜索词，或换个筛选条件试试。",
+    topics_filter_ph:"筛选主题",
+    sort_name:"按名称", sort_coverage:"按覆盖率", sort_gaps:"按缺口数",
+    no_topics_match:"没有匹配的主题。",
+    show_subs:"显示 {n} 个子主题",
+    no_topics:"还没有主题 — 先在命令行里创建一个吧。",
+    scope_gaps:"只看某个主题的缺口", scope_gaps_btn:"只看这个主题的缺口",
+    no_gaps:"还没有记录缺口 — 对某个主题运行缺口分析吧。", no_gaps_topic:"这个主题暂时没有缺口。",
+    rep_meta:"{n} 个小节 · {d}",
+    show_all_reps:"显示全部 {n} 篇报告",
+    no_reports:"还没有报告 — 为某个主题生成一份吧。",
+    no_activity_h:"还没有动态", no_activity_p:"导入论文、跑一次分析，这里就会开始积累记录。",
+    ev_topic:"主题 {id}",
+    report_sections:"{n} 个小节", report_no_sections:"没有保存任何小节。",
+    reader_loading:"加载中…",
+    et_al:"等",
+    reading_progress:"阅读状态 · 评分", tags:"标签", notes:"笔记",
+    added:"添加时间", updated:"最后修改", id:"ID",
+    publisher:"出版方页面",
+    rate:"评为 {n} 分", depth_title:"阅读深度：{x}", read_status_aria:"阅读状态",
+    moved:"已改为「{x}」", rated:"评分 {n} 分", rating_cleared:"已清除评分",
+    llm_not_configured:"LLM 未配置", llm_configured:"LLM 已配置",
+    theme_light:"浅色", theme_dark:"深色",
+    cfg_sub:"工作区设置 — 保存到 <span class=\"mono\">~/.research/config.toml</span>",
+    cfg_alert:"<b>{env}</b> 在当前 shell 里不存在。先导出它，再重启仪表盘，命令行工具也会一并识别。",
+    cfg_llm_desc:"用于缺口分析和报告生成。密钥本身留在环境变量里，这里只保存变量名。",
+    cfg_provider:"提供商", cfg_model:"模型", cfg_env:"API 密钥环境变量",
+    cfg_base:"Base URL", cfg_base_hint:"（OpenAI 兼容 · 留空用默认值）",
+    cfg_load_models:"获取模型列表", cfg_save:"保存 LLM 设置", cfg_remove:"删除设置",
+    key_ok:"密钥可用", key_missing:"环境里没有密钥", key_unset:"未配置",
+    p_llm:"LLM", p_workspace:"工作区", p_server:"仪表盘服务器",
+    ws_desc:"文献库数据库的位置。重启仪表盘后生效。",
+    ws_db:"数据库文件",
+    srv_desc:"正在 <span class=\"mono\">{host}</span> 上提供服务。要暴露到网络需要下面的访问令牌；MCP 不受影响 — 它在代理进程内通过 stdio 运行，不开放端口。",
+    srv_bind:"监听地址", srv_local:"仅本机 (localhost)",
+    srv_net:"0.0.0.0 — 局域网/外网（需要令牌）", srv_port:"端口",
+    srv_token:"访问令牌", srv_token_gen:"（绑定到网络时自动生成）",
+    srv_token_none:"（无 — 仅本机）",
+    srv_save:"保存设置", srv_restart:"保存并重启仪表盘",
+    toast_required:"提供商、模型和密钥变量名都要填写",
+    toast_llm_saved:"LLM 设置已保存", toast_llm_removed:"LLM 设置已删除",
+    toast_db_required:"数据库路径不能为空",
+    loading_models:"正在获取模型列表…", models_loaded:"已获取 {n} 个模型",
+    restarting:"正在重启…",
+    restart_fail:"仪表盘没有恢复 — 请手动运行 `research dashboard`",
+    copied:"已复制", copy_failed:"复制失败 — 请手动选中复制",
+    err_api:"无法连接仪表盘 API。", srv_unreachable:"无法连接服务器",
+    onb_h:"开始使用", onb_sub:"工作区还是空的 — 三条命令开启第一次调研",
+    onb_h2:"建起你的文献库",
+    onb_p:"research-agent 会为论文建立索引，记录你读过什么，并找出你错过的部分。",
+    onb_s1:"添加一个感兴趣的主题",
+    onb_s2:"从 arXiv 或 Semantic Scholar 导入论文",
+    onb_s3:"找出缺口，生成一份报告",
+    onb_foot:"命令行这边工作，仪表盘这边就会同步更新",
+    onb_foot_llm:" — 配置好 LLM 后，缺口分析和报告就能跑起来",
+    manual_sub:"在终端和仪表盘里使用 research-agent",
+  },
+  "zh-Hant": {
+    nav_overview:"總覽", nav_papers:"論文", nav_pipeline:"流程",
+    nav_history:"歷史", nav_results:"結果", nav_config:"設定", nav_manual:"手冊",
+    tagline:"本地研究桌",
+    menu:"選單", paper_detail:"論文詳情", report_detail:"報告",
+    all:"全部", all_topics:"全部主題", none_yet:"還沒有",
+    close:"關閉", read_btn:"檢視", read_paper:"閱讀內文", open_paper:"開啟原文",
+    search_ph:"搜尋標題、作者、標籤", scope_topic:"只看某個主題",
+    sort_recent:"最近加入", sort_relevance:"相關度", sort_rating:"評分", sort_title:"標題",
+    col_depth:"深度", col_paper:"論文", col_reading:"狀態",
+    col_rating:"評分", col_relevance:"相關度",
+    col_priority:"優先順序", col_desc:"說明", col_topic:"主題",
+    col_type:"類型", col_found:"發現日期",
+    t_papers:"論文", t_completed:"已讀完", t_gaps:"缺口", t_reports:"報告", t_avgcov:"平均覆蓋率",
+    cap_depth:"精讀 {n} 篇",
+    cap_completed:"佔全庫 {p}% · 待讀 {n} 篇",
+    cap_gaps:"高優先缺口 {n} 個",
+    cap_topics:"追蹤中的主題 {n} 個",
+    sec_depth:"閱讀深度", sec_reading:"閱讀流程", sec_coverage:"主題覆蓋率",
+    sec_stage:"各階段明細", sec_topics:"主題", sec_gaps:"知識缺口", sec_reports:"報告",
+    ov_sub:"論文 {p} 篇 · 主題 {t} 個",
+    pipe_sub:"論文從發現到精讀的完整路徑",
+    hist_sub:"{n} 筆事件", res_sub:"缺口 {g} 個 · 報告 {r} 篇 · 主題 {t} 個",
+    conv:"{p}% 進入「{next}」",
+    conv_aband:"中途放棄 {n} 篇",
+    stage_depth:"閱讀深度", stage_reading:"閱讀狀態",
+    topic_read:"已讀 {n} · 待讀 {m}", topic_none:"尚未分析", topic_gaps:"缺口 {n} 個",
+    shown_count:"顯示 {n} / {m} 篇",
+    no_match_h:"沒有符合的論文", no_match_p:"清空搜尋詞，或換個篩選條件試試。",
+    topics_filter_ph:"篩選主題",
+    sort_name:"按名稱", sort_coverage:"按覆蓋率", sort_gaps:"按缺口數",
+    no_topics_match:"沒有符合的主題。",
+    show_subs:"顯示 {n} 個子主題",
+    no_topics:"還沒有主題 — 先在命令列建立一個吧。",
+    scope_gaps:"只看某個主題的缺口", scope_gaps_btn:"只看這個主題的缺口",
+    no_gaps:"還沒有記錄缺口 — 對某個主題執行缺口分析吧。", no_gaps_topic:"這個主題暫時沒有缺口。",
+    rep_meta:"{n} 個小節 · {d}",
+    show_all_reps:"顯示全部 {n} 篇報告",
+    no_reports:"還沒有報告 — 為某個主題產生一份吧。",
+    no_activity_h:"還沒有動態", no_activity_p:"匯入論文、跑一次分析，這裡就會開始累積記錄。",
+    ev_topic:"主題 {id}",
+    report_sections:"{n} 個小節", report_no_sections:"沒有儲存任何小節。",
+    reader_loading:"載入中…",
+    et_al:"等",
+    reading_progress:"閱讀狀態 · 評分", tags:"標籤", notes:"筆記",
+    added:"加入時間", updated:"最後修改", id:"ID",
+    publisher:"出版方頁面",
+    rate:"評為 {n} 分", depth_title:"閱讀深度：{x}", read_status_aria:"閱讀狀態",
+    moved:"已改為「{x}」", rated:"評分 {n} 分", rating_cleared:"已清除評分",
+    llm_not_configured:"LLM 未設定", llm_configured:"LLM 已設定",
+    theme_light:"淺色", theme_dark:"深色",
+    cfg_sub:"工作區設定 — 儲存到 <span class=\"mono\">~/.research/config.toml</span>",
+    cfg_alert:"<b>{env}</b> 在目前的 shell 裡不存在。先匯出它，再重啟儀表板，命令列工具也會一併套用。",
+    cfg_llm_desc:"用於缺口分析和報告產生。金鑰本身留在環境變數裡，這裡只儲存變數名。",
+    cfg_provider:"供應商", cfg_model:"模型", cfg_env:"API 金鑰環境變數",
+    cfg_base:"Base URL", cfg_base_hint:"（OpenAI 相容 · 留白用預設值）",
+    cfg_load_models:"取得模型清單", cfg_save:"儲存 LLM 設定", cfg_remove:"刪除設定",
+    key_ok:"金鑰可用", key_missing:"環境裡沒有金鑰", key_unset:"未設定",
+    p_llm:"LLM", p_workspace:"工作區", p_server:"儀表板伺服器",
+    ws_desc:"書庫資料庫的位置。重啟儀表板後生效。",
+    ws_db:"資料庫檔案",
+    srv_desc:"正在 <span class=\"mono\">{host}</span> 上提供服務。要對外開放需要下面的存取權杖；MCP 不受影響 — 它在代理程式內透過 stdio 運作，不開連接埠。",
+    srv_bind:"監聽位址", srv_local:"僅本機 (localhost)",
+    srv_net:"0.0.0.0 — 對外網路（需要權杖）", srv_port:"連接埠",
+    srv_token:"存取權杖", srv_token_gen:"（綁定對外網路時自動產生）",
+    srv_token_none:"（無 — 僅本機）",
+    srv_save:"儲存設定", srv_restart:"儲存並重啟儀表板",
+    toast_required:"供應商、模型和金鑰變數名都要填寫",
+    toast_llm_saved:"LLM 設定已儲存", toast_llm_removed:"LLM 設定已刪除",
+    toast_db_required:"資料庫路徑不能留空",
+    loading_models:"正在取得模型清單…", models_loaded:"已取得 {n} 個模型",
+    restarting:"正在重啟…",
+    restart_fail:"儀表板沒有恢復 — 請手動執行 `research dashboard`",
+    copied:"已複製", copy_failed:"複製失敗 — 請手動選取複製",
+    err_api:"無法連上儀表板 API。", srv_unreachable:"無法連上伺服器",
+    onb_h:"開始使用", onb_sub:"工作區還是空的 — 三條命令開始第一份調查",
+    onb_h2:"建立你的書庫",
+    onb_p:"research-agent 會為論文建立索引，記錄你讀過什麼，並找出你錯過的部分。",
+    onb_s1:"新增一個感興趣的主題",
+    onb_s2:"從 arXiv 或 Semantic Scholar 匯入論文",
+    onb_s3:"找出缺口，產出一份報告",
+    onb_foot:"命令列這邊工作，儀表板這邊就會同步更新",
+    onb_foot_llm:" — 設定好 LLM 後，缺口分析和報告就能跑起來",
+    manual_sub:"在終端機與儀表板使用 research-agent",
+  },
+  es: {
+    nav_overview:"Resumen", nav_papers:"Artículos", nav_pipeline:"Flujo",
+    nav_history:"Historial", nav_results:"Resultados", nav_config:"Ajustes", nav_manual:"Manual",
+    tagline:"escritorio de investigación local",
+    menu:"Menú", paper_detail:"Detalle del artículo", report_detail:"Informe",
+    all:"Todos", all_topics:"Todos los temas", none_yet:"todavía ninguno",
+    close:"Cerrar", read_btn:"Ver", read_paper:"Leer el texto", open_paper:"Abrir original",
+    search_ph:"Buscar por título, autor o etiqueta", scope_topic:"Ver solo un tema",
+    sort_recent:"Añadidos recientemente", sort_relevance:"Relevancia", sort_rating:"Valoración", sort_title:"Título",
+    col_depth:"Profundidad", col_paper:"Artículo", col_reading:"Estado",
+    col_rating:"Valoración", col_relevance:"Relevancia",
+    col_priority:"Prioridad", col_desc:"Descripción", col_topic:"Tema",
+    col_type:"Tipo", col_found:"Detectado",
+    t_papers:"Artículos", t_completed:"Leídos", t_gaps:"Lagunas", t_reports:"Informes", t_avgcov:"Cobertura media",
+    cap_depth:"{n} leídos a fondo",
+    cap_completed:"{p}% de la biblioteca · {n} en cola",
+    cap_gaps:"{n} de prioridad alta",
+    cap_topics:"{n} temas en seguimiento",
+    sec_depth:"Profundidad de lectura", sec_reading:"Flujo de lectura", sec_coverage:"Cobertura por tema",
+    sec_stage:"Detalle por etapa", sec_topics:"Temas", sec_gaps:"Lagunas de conocimiento", sec_reports:"Informes",
+    ov_sub:"{p} artículos en {t} temas",
+    pipe_sub:"el camino de cada artículo, del descubrimiento a la lectura profunda",
+    hist_sub:"{n} eventos", res_sub:"{g} lagunas · {r} informes · {t} temas",
+    conv:"{p}% pasa a «{next}»",
+    conv_aband:"{n} abandonados por el camino",
+    stage_depth:"Profundidad", stage_reading:"Lectura",
+    topic_read:"{n} leídos · {m} en cola", topic_none:"aún sin analizar", topic_gaps:"{n} lagunas",
+    shown_count:"{n} de {m} mostrados",
+    no_match_h:"Nada coincide", no_match_p:"Borra la búsqueda o prueba otro filtro.",
+    topics_filter_ph:"Filtrar temas",
+    sort_name:"Por nombre", sort_coverage:"Por cobertura", sort_gaps:"Por lagunas",
+    no_topics_match:"Ningún tema coincide.",
+    show_subs:"Mostrar {n} subtemas",
+    no_topics:"Aún no hay temas — créalos desde la línea de comandos.",
+    scope_gaps:"Ver lagunas de un solo tema", scope_gaps_btn:"Ver solo las lagunas de este tema",
+    no_gaps:"No hay lagunas registradas — ejecuta el análisis de lagunas sobre un tema.", no_gaps_topic:"Este tema no tiene lagunas.",
+    rep_meta:"{n} secciones · {d}",
+    show_all_reps:"Mostrar los {n} informes",
+    no_reports:"Aún no hay informes — genera uno para un tema.",
+    no_activity_h:"Todavía sin actividad", no_activity_p:"Importa artículos y lanza análisis para llenar el historial.",
+    ev_topic:"tema {id}",
+    report_sections:"{n} secciones", report_no_sections:"Este informe no tiene secciones guardadas.",
+    reader_loading:"Cargando…",
+    et_al:"et al.",
+    reading_progress:"Progreso de lectura", tags:"Etiquetas", notes:"Notas",
+    added:"Añadido", updated:"Última edición", id:"ID",
+    publisher:"Página del editor",
+    rate:"Valorar con {n}", depth_title:"Profundidad: {x}", read_status_aria:"Estado de lectura",
+    moved:"Pasa a «{x}»", rated:"Valorado con {n}", rating_cleared:"Valoración borrada",
+    llm_not_configured:"LLM sin configurar", llm_configured:"LLM configurado",
+    theme_light:"Claro", theme_dark:"Oscuro",
+    cfg_sub:"ajustes del espacio — se guardan en <span class=\"mono\">~/.research/config.toml</span>",
+    cfg_alert:"<b>{env}</b> no está definido en esta shell. Exporta la variable y reinicia el panel para que el CLI también la vea.",
+    cfg_llm_desc:"Se usa para el análisis de lagunas y la generación de informes. La clave queda en tu entorno — solo se guarda su nombre.",
+    cfg_provider:"Proveedor", cfg_model:"Modelo", cfg_env:"Variable de la clave API",
+    cfg_base:"URL base", cfg_base_hint:"(compatible con OpenAI; vacío = valor por defecto)",
+    cfg_load_models:"Cargar lista de modelos", cfg_save:"Guardar ajustes del LLM", cfg_remove:"Eliminar",
+    key_ok:"clave presente", key_missing:"falta la clave en el entorno", key_unset:"sin configurar",
+    p_llm:"LLM", p_workspace:"Espacio de trabajo", p_server:"Servidor del panel",
+    ws_desc:"Dónde vive la base de datos de la biblioteca. Se aplica al reiniciar el panel.",
+    ws_db:"Archivo de base de datos",
+    srv_desc:"Sirviendo en <span class=\"mono\">{host}</span>. Para exponerlo a la red hace falta el token de abajo; MCP no se ve afectado — corre por stdio dentro del proceso de tu agente y nunca abre puertos.",
+    srv_bind:"Dirección de escucha", srv_local:"solo local (localhost)",
+    srv_net:"0.0.0.0 — red (token obligatorio)", srv_port:"Puerto",
+    srv_token:"Token de acceso", srv_token_gen:"(se genera al abrir a la red)",
+    srv_token_none:"(ninguno — solo local)",
+    srv_save:"Guardar ajustes", srv_restart:"Guardar y reiniciar el panel",
+    toast_required:"Proveedor, modelo y nombre de la clave son obligatorios",
+    toast_llm_saved:"Ajustes del LLM guardados", toast_llm_removed:"Ajustes del LLM eliminados",
+    toast_db_required:"La ruta de la base de datos es obligatoria",
+    loading_models:"cargando modelos…", models_loaded:"{n} modelos cargados",
+    restarting:"reiniciando…",
+    restart_fail:"El panel no volvió — arráncalo a mano con `research dashboard`",
+    copied:"copiado", copy_failed:"No se pudo copiar — selecciónalo a mano",
+    err_api:"No se puede conectar con la API del panel.", srv_unreachable:"servidor inalcanzable",
+    onb_h:"Bienvenido", onb_sub:"tu espacio está vacío — tres comandos hasta el primer sondeo",
+    onb_h2:"Arranca tu biblioteca",
+    onb_p:"research-agent indexa artículos, registra lo que lees y descubre lo que se te escapó.",
+    onb_s1:"Añade un tema que te interese",
+    onb_s2:"Trae artículos de arXiv o Semantic Scholar",
+    onb_s3:"Encuentra tus lagunas y genera un informe",
+    onb_foot:"El panel se actualiza mientras trabaja el CLI",
+    onb_foot_llm:" — y al configurar un LLM, el análisis de lagunas y los informes cobran vida",
+    manual_sub:"usa research-agent desde la terminal y desde este escritorio",
+  },
+  fr: {
+    nav_overview:"Aperçu", nav_papers:"Articles", nav_pipeline:"Pipeline",
+    nav_history:"Historique", nav_results:"Résultats", nav_config:"Réglages", nav_manual:"Manuel",
+    tagline:"bureau de recherche local",
+    menu:"Menu", paper_detail:"Détail de l'article", report_detail:"Rapport",
+    all:"Tous", all_topics:"Tous les sujets", none_yet:"aucun pour l'instant",
+    close:"Fermer", read_btn:"Voir", read_paper:"Lire le texte", open_paper:"Ouvrir l'original",
+    search_ph:"Rechercher par titre, auteur, tag", scope_topic:"Ne voir qu'un sujet",
+    sort_recent:"Ajoutés récemment", sort_relevance:"Pertinence", sort_rating:"Note", sort_title:"Titre",
+    col_depth:"Profondeur", col_paper:"Article", col_reading:"Statut",
+    col_rating:"Note", col_relevance:"Pertinence",
+    col_priority:"Priorité", col_desc:"Description", col_topic:"Sujet",
+    col_type:"Type", col_found:"Détecté le",
+    t_papers:"Articles", t_completed:"Lus", t_gaps:"Écarts", t_reports:"Rapports", t_avgcov:"Couverture moyenne",
+    cap_depth:"{n} lus en profondeur",
+    cap_completed:"{p}% de la bibliothèque · {n} en file",
+    cap_gaps:"{n} de priorité haute",
+    cap_topics:"{n} sujets suivis",
+    sec_depth:"Profondeur de lecture", sec_reading:"Pipeline de lecture", sec_coverage:"Couverture par sujet",
+    sec_stage:"Détail par étape", sec_topics:"Sujets", sec_gaps:"Écarts de connaissance", sec_reports:"Rapports",
+    ov_sub:"{p} articles répartis sur {t} sujets",
+    pipe_sub:"le chemin de chaque article, de la découverte à la lecture approfondie",
+    hist_sub:"{n} événements", res_sub:"{g} écarts · {r} rapports · {t} sujets",
+    conv:"{p}% passent à « {next} »",
+    conv_aband:"{n} abandonnés en route",
+    stage_depth:"Profondeur", stage_reading:"Lecture",
+    topic_read:"{n} lus · {m} en file", topic_none:"pas encore analysé", topic_gaps:"{n} écarts",
+    shown_count:"{n} sur {m} affichés",
+    no_match_h:"Aucun résultat", no_match_p:"Effacez la recherche ou essayez un autre filtre.",
+    topics_filter_ph:"Filtrer les sujets",
+    sort_name:"Par nom", sort_coverage:"Par couverture", sort_gaps:"Par écarts",
+    no_topics_match:"Aucun sujet ne correspond.",
+    show_subs:"Afficher {n} sous-sujets",
+    no_topics:"Aucun sujet pour l'instant — créez-en un en ligne de commande.",
+    scope_gaps:"Voir les écarts d'un seul sujet", scope_gaps_btn:"Voir uniquement les écarts de ce sujet",
+    no_gaps:"Aucun écart enregistré — lancez l'analyse des écarts sur un sujet.", no_gaps_topic:"Ce sujet n'a aucun écart.",
+    rep_meta:"{n} sections · {d}",
+    show_all_reps:"Afficher les {n} rapports",
+    no_reports:"Aucun rapport pour l'instant — générez-en un pour un sujet.",
+    no_activity_h:"Pas encore d'activité", no_activity_p:"Importez des articles et lancez des analyses pour remplir l'historique.",
+    ev_topic:"sujet {id}",
+    report_sections:"{n} sections", report_no_sections:"Aucune section enregistrée pour ce rapport.",
+    reader_loading:"Chargement…",
+    et_al:"et al.",
+    reading_progress:"Avancement de lecture", tags:"Tags", notes:"Notes",
+    added:"Ajouté le", updated:"Modifié le", id:"ID",
+    publisher:"Page de l'éditeur",
+    rate:"Noter {n}", depth_title:"Profondeur : {x}", read_status_aria:"Statut de lecture",
+    moved:"Passé à « {x} »", rated:"Noté {n}", rating_cleared:"Note effacée",
+    llm_not_configured:"LLM non configuré", llm_configured:"LLM configuré",
+    theme_light:"Clair", theme_dark:"Sombre",
+    cfg_sub:"réglages de l'espace — enregistrés dans <span class=\"mono\">~/.research/config.toml</span>",
+    cfg_alert:"<b>{env}</b> n'est pas défini dans ce shell. Exportez la variable puis redémarrez le tableau de bord pour que le CLI en profite aussi.",
+    cfg_llm_desc:"Utilisé pour l'analyse des écarts et la génération de rapports. La clé reste dans votre environnement — seul son nom est enregistré.",
+    cfg_provider:"Fournisseur", cfg_model:"Modèle", cfg_env:"Variable d'env. de la clé API",
+    cfg_base:"URL de base", cfg_base_hint:"(compatible OpenAI ; vide = valeur par défaut)",
+    cfg_load_models:"Charger la liste des modèles", cfg_save:"Enregistrer les réglages LLM", cfg_remove:"Supprimer",
+    key_ok:"clé présente", key_missing:"clé absente de l'environnement", key_unset:"non configuré",
+    p_llm:"LLM", p_workspace:"Espace de travail", p_server:"Serveur du tableau de bord",
+    ws_desc:"Emplacement de la base de la bibliothèque. Pris en compte au redémarrage du tableau de bord.",
+    ws_db:"Fichier de base de données",
+    srv_desc:"En écoute sur <span class=\"mono\">{host}</span>. Une exposition réseau exige le jeton ci-dessous ; MCP n'est pas concerné — il passe par stdio dans le processus de votre agent et n'ouvre aucun port.",
+    srv_bind:"Adresse d'écoute", srv_local:"local uniquement (localhost)",
+    srv_net:"0.0.0.0 — réseau (jeton requis)", srv_port:"Port",
+    srv_token:"Jeton d'accès", srv_token_gen:"(généré à l'ouverture réseau)",
+    srv_token_none:"(aucun — local uniquement)",
+    srv_save:"Enregistrer", srv_restart:"Enregistrer et redémarrer",
+    toast_required:"Fournisseur, modèle et nom de la clé sont tous requis",
+    toast_llm_saved:"Réglages LLM enregistrés", toast_llm_removed:"Réglages LLM supprimés",
+    toast_db_required:"Le chemin de la base est requis",
+    loading_models:"chargement des modèles…", models_loaded:"{n} modèles chargés",
+    restarting:"redémarrage…",
+    restart_fail:"Le tableau de bord ne revient pas — lancez `research dashboard` à la main",
+    copied:"copié", copy_failed:"Copie impossible — sélectionnez-le manuellement",
+    err_api:"Impossible de joindre l'API du tableau de bord.", srv_unreachable:"serveur injoignable",
+    onb_h:"Bienvenue", onb_sub:"votre espace est vide — trois commandes jusqu'au premier état des lieux",
+    onb_h2:"Lancez votre bibliothèque",
+    onb_p:"research-agent indexe les articles, garde la trace de vos lectures et repère ce qui vous a échappé.",
+    onb_s1:"Ajoutez un sujet qui vous tient à cœur",
+    onb_s2:"Importez des articles depuis arXiv ou Semantic Scholar",
+    onb_s3:"Repérez vos écarts, puis générez un rapport",
+    onb_foot:"Le tableau de bord se met à jour au fil du travail du CLI",
+    onb_foot_llm:" — et dès qu'un LLM est configuré, analyse des écarts et rapports s'activent",
+    manual_sub:"pilotez research-agent depuis le terminal et ce bureau",
+  },
+  de: {
+    nav_overview:"Übersicht", nav_papers:"Artikel", nav_pipeline:"Ablauf",
+    nav_history:"Verlauf", nav_results:"Ergebnisse", nav_config:"Einstellungen", nav_manual:"Handbuch",
+    tagline:"lokaler Forschungsschreibtisch",
+    menu:"Menü", paper_detail:"Artikeldetails", report_detail:"Bericht",
+    all:"Alle", all_topics:"Alle Themen", none_yet:"noch keine",
+    close:"Schließen", read_btn:"Ansehen", read_paper:"Text lesen", open_paper:"Original öffnen",
+    search_ph:"Titel, Autor, Tag durchsuchen", scope_topic:"Nur ein Thema anzeigen",
+    sort_recent:"Zuletzt hinzugefügt", sort_relevance:"Relevanz", sort_rating:"Bewertung", sort_title:"Titel",
+    col_depth:"Tiefe", col_paper:"Artikel", col_reading:"Status",
+    col_rating:"Bewertung", col_relevance:"Relevanz",
+    col_priority:"Priorität", col_desc:"Beschreibung", col_topic:"Thema",
+    col_type:"Art", col_found:"Gefunden",
+    t_papers:"Artikel", t_completed:"Gelesen", t_gaps:"Lücken", t_reports:"Berichte", t_avgcov:"Ø Abdeckung",
+    cap_depth:"{n} gründlich gelesen",
+    cap_completed:"{p}% der Bibliothek · {n} vorgemerkt",
+    cap_gaps:"{n} mit hoher Priorität",
+    cap_topics:"{n} Themen im Blick",
+    sec_depth:"Lesetiefe", sec_reading:"Lese-Ablauf", sec_coverage:"Themenabdeckung",
+    sec_stage:"Stufen im Detail", sec_topics:"Themen", sec_gaps:"Wissenslücken", sec_reports:"Berichte",
+    ov_sub:"{p} Artikel in {t} Themen",
+    pipe_sub:"der Weg jedes Artikels vom Fund bis zur vertieften Lektüre",
+    hist_sub:"{n} Ereignisse", res_sub:"{g} Lücken · {r} Berichte · {t} Themen",
+    conv:"{p}% gehen weiter zu „{next}“",
+    conv_aband:"{n} unterwegs abgebrochen",
+    stage_depth:"Tiefe", stage_reading:"Lesen",
+    topic_read:"{n} gelesen · {m} vorgemerkt", topic_none:"noch nicht analysiert", topic_gaps:"{n} Lücken",
+    shown_count:"{n} von {m} angezeigt",
+    no_match_h:"Nichts gefunden", no_match_p:"Suche leeren oder einen anderen Filter wählen.",
+    topics_filter_ph:"Themen filtern",
+    sort_name:"Nach Name", sort_coverage:"Nach Abdeckung", sort_gaps:"Nach Lücken",
+    no_topics_match:"Keine passenden Themen.",
+    show_subs:"{n} Unterthemen einblenden",
+    no_topics:"Noch keine Themen — leg eins in der Kommandozeile an.",
+    scope_gaps:"Lücken eines einzelnen Themas zeigen", scope_gaps_btn:"Nur Lücken dieses Themas zeigen",
+    no_gaps:"Keine Lücken erfasst — führe die Lückenanalyse für ein Thema aus.", no_gaps_topic:"Zu diesem Thema gibt es keine Lücken.",
+    rep_meta:"{n} Abschnitte · {d}",
+    show_all_reps:"Alle {n} Berichte zeigen",
+    no_reports:"Noch keine Berichte — erstelle einen für ein Thema.",
+    no_activity_h:"Noch keine Aktivität", no_activity_p:"Importiere Artikel und starte Analysen — der Verlauf füllt sich von selbst.",
+    ev_topic:"Thema {id}",
+    report_sections:"{n} Abschnitte", report_no_sections:"Dieser Bericht hat keine gespeicherten Abschnitte.",
+    reader_loading:"Wird geladen…",
+    et_al:"et al.",
+    reading_progress:"Lesefortschritt", tags:"Tags", notes:"Notizen",
+    added:"Hinzugefügt", updated:"Zuletzt geändert", id:"ID",
+    publisher:"Verlagsseite",
+    rate:"Mit {n} bewerten", depth_title:"Lesetiefe: {x}", read_status_aria:"Lesestatus",
+    moved:"Verschoben zu „{x}“", rated:"{n} Sterne vergeben", rating_cleared:"Bewertung entfernt",
+    llm_not_configured:"LLM nicht eingerichtet", llm_configured:"LLM eingerichtet",
+    theme_light:"Hell", theme_dark:"Dunkel",
+    cfg_sub:"Arbeitsbereich-Einstellungen — gespeichert in <span class=\"mono\">~/.research/config.toml</span>",
+    cfg_alert:"<b>{env}</b> ist in dieser Shell nicht gesetzt. Exportiere die Variable und starte das Dashboard neu, damit auch das CLI sie findet.",
+    cfg_llm_desc:"Für Lückenanalyse und Berichte. Der Schlüssel selbst bleibt in deiner Umgebung — nur sein Name wird gespeichert.",
+    cfg_provider:"Anbieter", cfg_model:"Modell", cfg_env:"Umgebungsvariable des API-Schlüssels",
+    cfg_base:"Basis-URL", cfg_base_hint:"(OpenAI-kompatibel; leer = Standard)",
+    cfg_load_models:"Modellliste laden", cfg_save:"LLM-Einstellungen speichern", cfg_remove:"Entfernen",
+    key_ok:"Schlüssel vorhanden", key_missing:"Schlüssel fehlt in der Umgebung", key_unset:"nicht eingerichtet",
+    p_llm:"LLM", p_workspace:"Arbeitsbereich", p_server:"Dashboard-Server",
+    ws_desc:"Wo die Bibliotheksdatenbank liegt. Wirkt nach einem Dashboard-Neustart.",
+    ws_db:"Datenbankdatei",
+    srv_desc:"Läuft auf <span class=\"mono\">{host}</span>. Für den Netzwerkzugriff wird der Zugangsschlüssel unten gebraucht; MCP bleibt unberührt — es läuft per stdio im Agent-Prozess und öffnet nie einen Port.",
+    srv_bind:"Bind-Adresse", srv_local:"nur lokal (localhost)",
+    srv_net:"0.0.0.0 — Netzwerk (Schlüssel nötig)", srv_port:"Port",
+    srv_token:"Zugangsschlüssel", srv_token_gen:"(bei Netzwerk-Bind erzeugt)",
+    srv_token_none:"(keiner — nur lokal)",
+    srv_save:"Einstellungen speichern", srv_restart:"Speichern &amp; Dashboard neu starten",
+    toast_required:"Anbieter, Modell und Schlüsselname sind alle nötig",
+    toast_llm_saved:"LLM-Einstellungen gespeichert", toast_llm_removed:"LLM-Einstellungen entfernt",
+    toast_db_required:"Datenbankpfad ist nötig",
+    loading_models:"Modelle werden geladen…", models_loaded:"{n} Modelle geladen",
+    restarting:"Neustart…",
+    restart_fail:"Dashboard kommt nicht zurück — starte `research dashboard` von Hand",
+    copied:"kopiert", copy_failed:"Kopieren fehlgeschlagen — bitte manuell markieren",
+    err_api:"Dashboard-API nicht erreichbar.", srv_unreachable:"Server nicht erreichbar",
+    onb_h:"Willkommen", onb_sub:"dein Arbeitsbereich ist leer — drei Befehle bis zur ersten Übersicht",
+    onb_h2:"Starte deine Bibliothek",
+    onb_p:"research-agent indexiert Artikel, hält fest, was du gelesen hast, und zeigt dir, was dir entgangen ist.",
+    onb_s1:"Lege ein Thema an, das dich interessiert",
+    onb_s2:"Hol Artikel von arXiv oder Semantic Scholar",
+    onb_s3:"Finde deine Lücken und erstelle einen Bericht",
+    onb_foot:"Das Dashboard aktualisiert sich, während das CLI arbeitet",
+    onb_foot_llm:" — und sobald ein LLM eingerichtet ist, leben Lückenanalyse und Berichte auf",
+    manual_sub:"research-agent aus dem Terminal und von diesem Schreibtisch steuern",
+  },
+  pt: {
+    nav_overview:"Visão geral", nav_papers:"Artigos", nav_pipeline:"Fluxo",
+    nav_history:"Histórico", nav_results:"Resultados", nav_config:"Ajustes", nav_manual:"Manual",
+    tagline:"mesa de pesquisa local",
+    menu:"Menu", paper_detail:"Detalhes do artigo", report_detail:"Relatório",
+    all:"Todos", all_topics:"Todos os tópicos", none_yet:"nenhum ainda",
+    close:"Fechar", read_btn:"Ver", read_paper:"Ler o texto", open_paper:"Abrir original",
+    search_ph:"Buscar por título, autor, tag", scope_topic:"Ver só um tópico",
+    sort_recent:"Adicionados recentemente", sort_relevance:"Relevância", sort_rating:"Nota", sort_title:"Título",
+    col_depth:"Profundidade", col_paper:"Artigo", col_reading:"Estado",
+    col_rating:"Nota", col_relevance:"Relevância",
+    col_priority:"Prioridade", col_desc:"Descrição", col_topic:"Tópico",
+    col_type:"Tipo", col_found:"Encontrado",
+    t_papers:"Artigos", t_completed:"Lidos", t_gaps:"Lacunas", t_reports:"Relatórios", t_avgcov:"Cobertura média",
+    cap_depth:"{n} lidos a fundo",
+    cap_completed:"{p}% do acervo · {n} na fila",
+    cap_gaps:"{n} de prioridade alta",
+    cap_topics:"{n} tópicos em acompanhamento",
+    sec_depth:"Profundidade de leitura", sec_reading:"Fluxo de leitura", sec_coverage:"Cobertura por tópico",
+    sec_stage:"Detalhe por etapa", sec_topics:"Tópicos", sec_gaps:"Lacunas de conhecimento", sec_reports:"Relatórios",
+    ov_sub:"{p} artigos em {t} tópicos",
+    pipe_sub:"o caminho de cada artigo, da descoberta à leitura a fundo",
+    hist_sub:"{n} eventos", res_sub:"{g} lacunas · {r} relatórios · {t} tópicos",
+    conv:"{p}% avança para “{next}”",
+    conv_aband:"{n} abandonados no caminho",
+    stage_depth:"Profundidade", stage_reading:"Leitura",
+    topic_read:"{n} lidos · {m} na fila", topic_none:"ainda sem análise", topic_gaps:"{n} lacunas",
+    shown_count:"{n} de {m} exibidos",
+    no_match_h:"Nada encontrado", no_match_p:"Limpe a busca ou escolha outro filtro.",
+    topics_filter_ph:"Filtrar tópicos",
+    sort_name:"Por nome", sort_coverage:"Por cobertura", sort_gaps:"Por lacunas",
+    no_topics_match:"Nenhum tópico corresponde.",
+    show_subs:"Mostrar {n} subtópicos",
+    no_topics:"Ainda sem tópicos — crie um pela linha de comando.",
+    scope_gaps:"Ver lacunas de um só tópico", scope_gaps_btn:"Ver só as lacunas deste tópico",
+    no_gaps:"Nenhuma lacuna registrada — rode a análise de lacunas num tópico.", no_gaps_topic:"Este tópico não tem lacunas.",
+    rep_meta:"{n} seções · {d}",
+    show_all_reps:"Mostrar todos os {n} relatórios",
+    no_reports:"Ainda sem relatórios — gere um para um tópico.",
+    no_activity_h:"Ainda sem atividade", no_activity_p:"Importe artigos e rode análises para encher o histórico.",
+    ev_topic:"tópico {id}",
+    report_sections:"{n} seções", report_no_sections:"Este relatório não tem seções guardadas.",
+    reader_loading:"Carregando…",
+    et_al:"et al.",
+    reading_progress:"Progresso de leitura", tags:"Tags", notes:"Notas",
+    added:"Adicionado", updated:"Última alteração", id:"ID",
+    publisher:"Página da editora",
+    rate:"Dar nota {n}", depth_title:"Profundidade: {x}", read_status_aria:"Estado de leitura",
+    moved:"Passou para “{x}”", rated:"Nota {n} dada", rating_cleared:"Nota removida",
+    llm_not_configured:"LLM não configurado", llm_configured:"LLM configurado",
+    theme_light:"Claro", theme_dark:"Escuro",
+    cfg_sub:"ajustes do espaço de trabalho — salvos em <span class=\"mono\">~/.research/config.toml</span>",
+    cfg_alert:"<b>{env}</b> não está definido neste shell. Exporte a variável e reinicie o painel para que o CLI também a enxergue.",
+    cfg_llm_desc:"Usado na análise de lacunas e na geração de relatórios. A chave fica no seu ambiente — só o nome é guardado.",
+    cfg_provider:"Provedor", cfg_model:"Modelo", cfg_env:"Variável da chave de API",
+    cfg_base:"URL base", cfg_base_hint:"(compatível com OpenAI; vazio = padrão)",
+    cfg_load_models:"Carregar lista de modelos", cfg_save:"Salvar ajustes do LLM", cfg_remove:"Remover",
+    key_ok:"chave presente", key_missing:"faltando a chave no ambiente", key_unset:"não configurado",
+    p_llm:"LLM", p_workspace:"Espaço de trabalho", p_server:"Servidor do painel",
+    ws_desc:"Onde vive o banco do acervo. Vale após reiniciar o painel.",
+    ws_db:"Arquivo do banco de dados",
+    srv_desc:"Servindo em <span class=\"mono\">{host}</span>. Para expor à rede é preciso o token abaixo; o MCP não é afetado — roda por stdio dentro do processo do seu agente e nunca abre porta.",
+    srv_bind:"Endereço de escuta", srv_local:"só local (localhost)",
+    srv_net:"0.0.0.0 — rede (token obrigatório)", srv_port:"Porta",
+    srv_token:"Token de acesso", srv_token_gen:"(gerado ao abrir para a rede)",
+    srv_token_none:"(nenhum — só local)",
+    srv_save:"Salvar ajustes", srv_restart:"Salvar e reiniciar o painel",
+    toast_required:"Provedor, modelo e nome da chave são todos obrigatórios",
+    toast_llm_saved:"Ajustes do LLM salvos", toast_llm_removed:"Ajustes do LLM removidos",
+    toast_db_required:"O caminho do banco é obrigatório",
+    loading_models:"carregando modelos…", models_loaded:"{n} modelos carregados",
+    restarting:"reiniciando…",
+    restart_fail:"O painel não voltou — inicie `research dashboard` na mão",
+    copied:"copiado", copy_failed:"Não deu para copiar — selecione manualmente",
+    err_api:"Não foi possível falar com a API do painel.", srv_unreachable:"servidor inacessível",
+    onb_h:"Boas-vindas", onb_sub:"seu espaço está vazio — três comandos até o primeiro levantamento",
+    onb_h2:"Comece seu acervo",
+    onb_p:"O research-agent indexa artigos, registra o que você leu e descobre o que passou batido.",
+    onb_s1:"Adicione um tópico do seu interesse",
+    onb_s2:"Traga artigos do arXiv ou Semantic Scholar",
+    onb_s3:"Encontre suas lacunas e gere um relatório",
+    onb_foot:"O painel se atualiza enquanto o CLI trabalha",
+    onb_foot_llm:" — e com um LLM configurado, análise de lacunas e relatórios ganham vida",
+    manual_sub:"use o research-agent pelo terminal e por esta mesa",
+  },
+  ru: {
+    nav_overview:"Обзор", nav_papers:"Статьи", nav_pipeline:"Конвейер",
+    nav_history:"История", nav_results:"Результаты", nav_config:"Настройки", nav_manual:"Справка",
+    tagline:"локальный исследовательский стол",
+    menu:"Меню", paper_detail:"О статье", report_detail:"Отчёт",
+    all:"Все", all_topics:"Все темы", none_yet:"пока нет",
+    close:"Закрыть", read_btn:"Открыть", read_paper:"Читать текст", open_paper:"Открыть оригинал",
+    search_ph:"Поиск по названию, автору, тегу", scope_topic:"Показать одну тему",
+    sort_recent:"Сначала новые", sort_relevance:"Релевантность", sort_rating:"Оценка", sort_title:"Название",
+    col_depth:"Глубина", col_paper:"Статья", col_reading:"Статус",
+    col_rating:"Оценка", col_relevance:"Релевантность",
+    col_priority:"Приоритет", col_desc:"Описание", col_topic:"Тема",
+    col_type:"Тип", col_found:"Найдено",
+    t_papers:"Статьи", t_completed:"Прочитано", t_gaps:"Пробелы", t_reports:"Отчёты", t_avgcov:"Среднее покрытие",
+    cap_depth:"{n} изучены глубоко",
+    cap_completed:"{p}% библиотеки · {n} в очереди",
+    cap_gaps:"{n} с высоким приоритетом",
+    cap_topics:"тем в работе: {n}",
+    sec_depth:"Глубина чтения", sec_reading:"Конвейер чтения", sec_coverage:"Покрытие тем",
+    sec_stage:"Разбивка по этапам", sec_topics:"Темы", sec_gaps:"Пробелы в знаниях", sec_reports:"Отчёты",
+    ov_sub:"{p} статей в {t} темах",
+    pipe_sub:"путь каждой статьи — от находки до внимательного изучения",
+    hist_sub:"событий: {n}", res_sub:"пробелов: {g} · отчётов: {r} · тем: {t}",
+    conv:"{p}% переходят к «{next}»",
+    conv_aband:"{n} брошено по дороге",
+    stage_depth:"Глубина", stage_reading:"Чтение",
+    topic_read:"прочитано {n} · в очереди {m}", topic_none:"ещё не анализировалось", topic_gaps:"пробелов: {n}",
+    shown_count:"показано {n} из {m}",
+    no_match_h:"Ничего не найдено", no_match_p:"Очистите поиск или выберите другой фильтр.",
+    topics_filter_ph:"Фильтр тем",
+    sort_name:"По имени", sort_coverage:"По покрытию", sort_gaps:"По пробелам",
+    no_topics_match:"Подходящих тем нет.",
+    show_subs:"Показать подтемы: {n}",
+    no_topics:"Тем пока нет — создайте первую в командной строке.",
+    scope_gaps:"Пробелы одной темы", scope_gaps_btn:"Показать пробелы только этой темы",
+    no_gaps:"Пробелов не записано — запустите анализ пробелов по теме.", no_gaps_topic:"У этой темы пробелов нет.",
+    rep_meta:"разделов: {n} · {d}",
+    show_all_reps:"Показать все отчёты ({n})",
+    no_reports:"Отчётов пока нет — сгенерируйте по теме.",
+    no_activity_h:"Активности пока нет", no_activity_p:"Импортируйте статьи и запустите анализ — история начнёт копиться.",
+    ev_topic:"тема {id}",
+    report_sections:"разделов: {n}", report_no_sections:"В отчёте нет сохранённых разделов.",
+    reader_loading:"Загрузка…",
+    et_al:"и др.",
+    reading_progress:"Чтение", tags:"Теги", notes:"Заметки",
+    added:"Добавлена", updated:"Обновлена", id:"ID",
+    publisher:"Страница издания",
+    rate:"Оценить на {n}", depth_title:"Глубина: {x}", read_status_aria:"Статус чтения",
+    moved:"Статус: {x}", rated:"Оценка {n}", rating_cleared:"Оценка снята",
+    llm_not_configured:"LLM не настроен", llm_configured:"LLM настроен",
+    theme_light:"Светлая", theme_dark:"Тёмная",
+    cfg_sub:"настройки рабочей области — хранятся в <span class=\"mono\">~/.research/config.toml</span>",
+    cfg_alert:"<b>{env}</b> не задан в этой оболочке. Экспортируйте переменную и перезапустите панель — CLI тоже её подхватит.",
+    cfg_llm_desc:"Нужен для анализа пробелов и генерации отчётов. Сам ключ остаётся в окружении — хранится только имя переменной.",
+    cfg_provider:"Провайдер", cfg_model:"Модель", cfg_env:"Переменная с ключом API",
+    cfg_base:"Базовый URL", cfg_base_hint:"(совместимый с OpenAI; пусто = по умолчанию)",
+    cfg_load_models:"Загрузить список моделей", cfg_save:"Сохранить настройки LLM", cfg_remove:"Удалить",
+    key_ok:"ключ найден", key_missing:"ключа нет в окружении", key_unset:"не настроен",
+    p_llm:"LLM", p_workspace:"Рабочая область", p_server:"Сервер панели",
+    ws_desc:"Где лежит база библиотеки. Вступает в силу после перезапуска панели.",
+    ws_db:"Файл базы данных",
+    srv_desc:"Работает на <span class=\"mono\">{host}</span>. Для доступа по сети нужен токен ниже; MCP не затронут — он работает через stdio внутри процесса агента и не открывает портов.",
+    srv_bind:"Адрес", srv_local:"только локально (localhost)",
+    srv_net:"0.0.0.0 — по сети (нужен токен)", srv_port:"Порт",
+    srv_token:"Токен доступа", srv_token_gen:"(создаётся при сетевом запуске)",
+    srv_token_none:"(нет — только локально)",
+    srv_save:"Сохранить настройки", srv_restart:"Сохранить и перезапустить панель",
+    toast_required:"Нужны провайдер, модель и имя ключа",
+    toast_llm_saved:"Настройки LLM сохранены", toast_llm_removed:"Настройки LLM удалены",
+    toast_db_required:"Путь к базе обязателен",
+    loading_models:"загружаем модели…", models_loaded:"моделей загружено: {n}",
+    restarting:"перезапуск…",
+    restart_fail:"Панель не вернулась — запустите `research dashboard` вручную",
+    copied:"скопировано", copy_failed:"Не удалось скопировать — выделите вручную",
+    err_api:"Не удаётся связаться с API панели.", srv_unreachable:"сервер недоступен",
+    onb_h:"Добро пожаловать", onb_sub:"рабочая область пуста — три команды до первого обзора",
+    onb_h2:"Создайте библиотеку",
+    onb_p:"research-agent индексирует статьи, помнит прочитанное и находит то, что вы упустили.",
+    onb_s1:"Добавьте интересующую тему",
+    onb_s2:"Подтяните статьи с arXiv или Semantic Scholar",
+    onb_s3:"Найдите пробелы и составьте отчёт",
+    onb_foot:"Панель обновляется сама, пока работает CLI",
+    onb_foot_llm:" — а с настроенным LLM оживают анализ пробелов и отчёты",
+    manual_sub:"research-agent из терминала и с этого стола",
+  },
+  it: {
+    nav_overview:"Panoramica", nav_papers:"Articoli", nav_pipeline:"Flusso",
+    nav_history:"Cronologia", nav_results:"Risultati", nav_config:"Impostazioni", nav_manual:"Manuale",
+    tagline:"scrivania di ricerca locale",
+    menu:"Menu", paper_detail:"Dettagli articolo", report_detail:"Rapporto",
+    all:"Tutti", all_topics:"Tutti gli argomenti", none_yet:"ancora nessuno",
+    close:"Chiudi", read_btn:"Vedi", read_paper:"Leggi il testo", open_paper:"Apri l'originale",
+    search_ph:"Cerca per titolo, autore, tag", scope_topic:"Mostra un solo argomento",
+    sort_recent:"Aggiunti di recente", sort_relevance:"Rilevanza", sort_rating:"Voto", sort_title:"Titolo",
+    col_depth:"Profondità", col_paper:"Articolo", col_reading:"Stato",
+    col_rating:"Voto", col_relevance:"Rilevanza",
+    col_priority:"Priorità", col_desc:"Descrizione", col_topic:"Argomento",
+    col_type:"Tipo", col_found:"Trovato",
+    t_papers:"Articoli", t_completed:"Letti", t_gaps:"Lacune", t_reports:"Rapporti", t_avgcov:"Copertura media",
+    cap_depth:"{n} letti a fondo",
+    cap_completed:"{p}% della libreria · {n} in coda",
+    cap_gaps:"{n} ad alta priorità",
+    cap_topics:"{n} argomenti seguiti",
+    sec_depth:"Profondità di lettura", sec_reading:"Flusso di lettura", sec_coverage:"Copertura per argomento",
+    sec_stage:"Dettaglio per fase", sec_topics:"Argomenti", sec_gaps:"Lacune di conoscenza", sec_reports:"Rapporti",
+    ov_sub:"{p} articoli su {t} argomenti",
+    pipe_sub:"il percorso di ogni articolo, dalla scoperta alla lettura approfondita",
+    hist_sub:"{n} eventi", res_sub:"{g} lacune · {r} rapporti · {t} argomenti",
+    conv:"{p}% passa a «{next}»",
+    conv_aband:"{n} abbandonati lungo la strada",
+    stage_depth:"Profondità", stage_reading:"Lettura",
+    topic_read:"{n} letti · {m} in coda", topic_none:"non ancora analizzato", topic_gaps:"{n} lacune",
+    shown_count:"{n} di {m} mostrati",
+    no_match_h:"Nessun risultato", no_match_p:"Cancella la ricerca o prova un altro filtro.",
+    topics_filter_ph:"Filtra argomenti",
+    sort_name:"Per nome", sort_coverage:"Per copertura", sort_gaps:"Per lacune",
+    no_topics_match:"Nessun argomento corrisponde.",
+    show_subs:"Mostra {n} sotto-argomenti",
+    no_topics:"Ancora nessun argomento — creane uno da riga di comando.",
+    scope_gaps:"Vedi le lacune di un solo argomento", scope_gaps_btn:"Mostra solo le lacune di questo argomento",
+    no_gaps:"Nessuna lacuna registrata — esegui l'analisi delle lacune su un argomento.", no_gaps_topic:"Questo argomento non ha lacune.",
+    rep_meta:"{n} sezioni · {d}",
+    show_all_reps:"Mostra tutti i {n} rapporti",
+    no_reports:"Ancora nessun rapporto — generalo per un argomento.",
+    no_activity_h:"Ancora nessuna attività", no_activity_p:"Importa articoli e lancia le analisi per riempire la cronologia.",
+    ev_topic:"argomento {id}",
+    report_sections:"{n} sezioni", report_no_sections:"Questo rapporto non ha sezioni salvate.",
+    reader_loading:"Caricamento…",
+    et_al:"et al.",
+    reading_progress:"Avanzamento lettura", tags:"Tag", notes:"Note",
+    added:"Aggiunto", updated:"Ultima modifica", id:"ID",
+    publisher:"Pagina dell'editore",
+    rate:"Vota {n}", depth_title:"Profondità: {x}", read_status_aria:"Stato di lettura",
+    moved:"Passato a «{x}»", rated:"Votato {n}", rating_cleared:"Voto rimosso",
+    llm_not_configured:"LLM non configurato", llm_configured:"LLM configurato",
+    theme_light:"Chiaro", theme_dark:"Scuro",
+    cfg_sub:"impostazioni dell'area di lavoro — salvate in <span class=\"mono\">~/.research/config.toml</span>",
+    cfg_alert:"<b>{env}</b> non è impostato in questa shell. Esporta la variabile e riavvia il pannello: anche il CLI la riconoscerà.",
+    cfg_llm_desc:"Usato per l'analisi delle lacune e la generazione dei rapporti. La chiave resta nel tuo ambiente — viene salvato solo il nome.",
+    cfg_provider:"Provider", cfg_model:"Modello", cfg_env:"Variabile della chiave API",
+    cfg_base:"URL di base", cfg_base_hint:"(compatibile OpenAI; vuoto = predefinito)",
+    cfg_load_models:"Carica elenco modelli", cfg_save:"Salva impostazioni LLM", cfg_remove:"Rimuovi",
+    key_ok:"chiave presente", key_missing:"chiave mancante nell'ambiente", key_unset:"non configurato",
+    p_llm:"LLM", p_workspace:"Area di lavoro", p_server:"Server del pannello",
+    ws_desc:"Dove vive il database della libreria. Ha effetto al riavvio del pannello.",
+    ws_db:"File del database",
+    srv_desc:"In servizio su <span class=\"mono\">{host}</span>. Per l'accesso di rete serve il token qui sotto; MCP non è toccato — gira via stdio nel processo del tuo agente e non apre mai porte.",
+    srv_bind:"Indirizzo di ascolto", srv_local:"solo locale (localhost)",
+    srv_net:"0.0.0.0 — rete (token richiesto)", srv_port:"Porta",
+    srv_token:"Token di accesso", srv_token_gen:"(generato all'apertura di rete)",
+    srv_token_none:"(nessuno — solo locale)",
+    srv_save:"Salva impostazioni", srv_restart:"Salva e riavvia il pannello",
+    toast_required:"Servono provider, modello e nome della chiave",
+    toast_llm_saved:"Impostazioni LLM salvate", toast_llm_removed:"Impostazioni LLM rimosse",
+    toast_db_required:"Il percorso del database è obbligatorio",
+    loading_models:"caricamento modelli…", models_loaded:"{n} modelli caricati",
+    restarting:"riavvio…",
+    restart_fail:"Il pannello non torna — avvia `research dashboard` a mano",
+    copied:"copiato", copy_failed:"Copia non riuscita — selezionalo manualmente",
+    err_api:"Impossibile contattare l'API del pannello.", srv_unreachable:"server irraggiungibile",
+    onb_h:"Benvenuto", onb_sub:"l'area di lavoro è vuota — tre comandi alla prima ricognizione",
+    onb_h2:"Avvia la tua libreria",
+    onb_p:"research-agent indicizza gli articoli, tiene traccia di ciò che leggi e scopre ciò che ti è sfuggito.",
+    onb_s1:"Aggiungi un argomento che ti interessa",
+    onb_s2:"Porta articoli da arXiv o Semantic Scholar",
+    onb_s3:"Trova le lacune e genera un rapporto",
+    onb_foot:"Il pannello si aggiorna mentre lavora il CLI",
+    onb_foot_llm:" — e con un LLM configurato, analisi delle lacune e rapporti prendono vita",
+    manual_sub:"usa research-agent dal terminale e da questa scrivania",
   },
 };
 
-const systemLang = () => (navigator.language || "en").toLowerCase().startsWith("ko") ? "ko" : "en";
+/* UI languages mirror the README translations (docs/i18n/*): native names,
+   README order. Anything untranslated falls back to English per key. */
+const LANGS = [
+  ["en","English"],["ko","한국어"],["ja","日本語"],["zh-Hans","简体中文"],["zh-Hant","繁體中文"],
+  ["es","Español"],["fr","Français"],["de","Deutsch"],["pt","Português"],["ru","Русский"],["it","Italiano"],
+];
+const systemLang = () => {
+  const nl = (navigator.language || "en").toLowerCase();
+  if (nl.startsWith("ko")) return "ko";
+  if (nl.startsWith("ja")) return "ja";
+  if (nl.startsWith("zh")) return /tw|hk|hant/.test(nl) ? "zh-Hant" : "zh-Hans";
+  for (const [code] of LANGS) if (nl.startsWith(code)) return code;
+  return "en";
+};
 const systemTheme = () =>
   window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
 
@@ -660,11 +1741,12 @@ function applyTheme() {
 
 function applyLang() {
   document.documentElement.lang = LANG;
-  const btn = $("lang-toggle");
-  if (btn) {
-    btn.textContent = LANG === "ko" ? "EN" : "한";
-    btn.title = LANG === "ko" ? "English" : "한국어";
-  }
+  const cur = $("lang-cur");
+  if (cur) cur.textContent = (LANGS.find(([c]) => c === LANG) || LANGS[0])[1];
+  const burger = $("burger");
+  if (burger) burger.setAttribute("aria-label", t("menu"));
+  $("drawer")?.setAttribute("aria-label", t("paper_detail"));
+  $("reader")?.setAttribute("aria-label", t("report_detail"));
   const tag = document.querySelector(".wordmark .s");
   if (tag) tag.textContent = t("tagline");
   // The unconfigured-LLM row is static markup, so it needs translating here;
@@ -738,7 +1820,7 @@ function funnel(target, stages, counts, colors, labels) {
     if (i < stages.length - 1 && n > 0) {
       const next = counts[stages[i + 1]] || 0;
       const conv = Math.round(100 * next / n);
-      html += '<div class="conv">' + conv + "% advance to " + esc(labels[stages[i + 1]].toLowerCase()) + "</div>";
+      html += '<div class="conv">' + esc(fmt("conv", { p: conv, next: labels[stages[i + 1]] })) + "</div>";
     }
   });
   $(target).innerHTML = html;
@@ -755,21 +1837,21 @@ function ring(p, radius, frac, cls) {
 
 function dmark(stage) {
   const idx = DEPTHS.indexOf(stage);
-  return '<span class="dmark" title="Depth: ' + esc(DEPTH_LABEL[stage]) + '">' +
+  return '<span class="dmark" title="' + esc(fmt("depth_title", { x: DL[LANG][stage] })) + '">' +
     DEPTHS.map((_, i) => "<i" + (i <= idx ? ' class="f' + (idx + 1) + '"' : "") + "></i>").join("") + "</span>";
 }
 
 function stars(paper) {
   const r = paper.rating || 0;
   return '<span class="stars" data-id="' + esc(paper.id) + '">' +
-    [1,2,3,4,5].map(i => '<button data-star="' + i + '" aria-label="Rate ' + i + '"' +
+    [1,2,3,4,5].map(i => '<button data-star="' + i + '" aria-label="' + esc(fmt("rate", { n: i })) + '"' +
       (i <= r ? ' class="on"' : "") + ">★</button>").join("") + "</span>";
 }
 
 function statusSelect(paper) {
-  return '<select class="stepper" data-id="' + esc(paper.id) + '" aria-label="Reading status">' +
+  return '<select class="stepper" data-id="' + esc(paper.id) + '" aria-label="' + esc(t("read_status_aria")) + '">' +
     READS.map(s => '<option value="' + s + '"' + (paper.reading_status === s ? " selected" : "") + ">" +
-      esc(READ_LABEL[s]) + "</option>").join("") + "</select>";
+      esc(RL[LANG][s]) + "</option>").join("") + "</select>";
 }
 
 /* optimistic write with rollback */
@@ -825,40 +1907,40 @@ function drawResults() {
   const shownReps = state.reportsShowAll ? reps : reps.slice(0, REPORTS_CAP);
 
   $("main").innerHTML = `
-    <div class="page-head"><h1>Results</h1>
-      <span class="page-sub">${nfmt(gaps.length)} gaps · ${nfmt(reps.length)} reports · ${nfmt(topics.length)} topics</span></div>
-    <div class="section-h" style="margin-top:24px">Topics</div>
+    <div class="page-head"><h1>${esc(t("nav_results"))}</h1>
+      <span class="page-sub">${esc(fmt("res_sub", { g: nfmt(gaps.length), r: nfmt(reps.length), t: nfmt(topics.length) }))}</span></div>
+    <div class="section-h" style="margin-top:24px">${esc(t("sec_topics"))}</div>
     ${topics.length ? `
       <div class="toolbar">
-        <div class="search">${ICON.search}<input id="t-query" placeholder="Filter topics" value="${esc(state.topicQuery)}"></div>
+        <div class="search">${ICON.search}<input id="t-query" placeholder="${esc(t("topics_filter_ph"))}" value="${esc(state.topicQuery)}"></div>
         <select id="t-sort" style="margin-left:auto">
-          <option value="name"${state.topicSort === "name" ? " selected" : ""}>By name</option>
-          <option value="coverage"${state.topicSort === "coverage" ? " selected" : ""}>By coverage</option>
-          <option value="gaps"${state.topicSort === "gaps" ? " selected" : ""}>By gaps</option>
+          <option value="name"${state.topicSort === "name" ? " selected" : ""}>${esc(t("sort_name"))}</option>
+          <option value="coverage"${state.topicSort === "coverage" ? " selected" : ""}>${esc(t("sort_coverage"))}</option>
+          <option value="gaps"${state.topicSort === "gaps" ? " selected" : ""}>${esc(t("sort_gaps"))}</option>
         </select>
       </div>
-      ${visible.length ? topicRows(visible, false) : nothing("No topics match.")}
-      ${hidden > 0 ? '<button class="btn ghost" id="t-toggle">Show ' + hidden + " sub-topic" + (hidden === 1 ? "" : "s") + "</button>" : ""}`
-    : nothing("No topics yet — create one from the command line.")}
-    <div class="section-h">Knowledge gaps</div>
-    ${topics.length ? `<div class="toolbar"><select id="g-topic" title="Scope gaps to one topic">
-        <option value="all">All topics</option>
+      ${visible.length ? topicRows(visible, false) : nothing(t("no_topics_match"))}
+      ${hidden > 0 ? '<button class="btn ghost" id="t-toggle">' + esc(fmt("show_subs", { n: hidden })) + "</button>" : ""}`
+    : nothing(t("no_topics"))}
+    <div class="section-h">${esc(t("sec_gaps"))}</div>
+    ${topics.length ? `<div class="toolbar"><select id="g-topic" title="${esc(t("scope_gaps"))}">
+        <option value="all">${esc(t("all_topics"))}</option>
         ${topics.map(t => '<option value="' + esc(t.id) + '"' + (state.topicFilter === t.id ? " selected" : "") + ">" + esc(t.name) + "</option>").join("")}
       </select></div>` : ""}
-    ${glist.length ? `<table><thead><tr><th style="width:130px">Priority</th><th>Description</th><th style="width:160px">Topic</th><th style="width:190px">Type</th><th style="width:100px">Found</th></tr></thead><tbody>
+    ${glist.length ? `<table><thead><tr><th style="width:130px">${esc(t("col_priority"))}</th><th>${esc(t("col_desc"))}</th><th style="width:160px">${esc(t("col_topic"))}</th><th style="width:190px">${esc(t("col_type"))}</th><th style="width:100px">${esc(t("col_found"))}</th></tr></thead><tbody>
         ${glist.map(g => '<tr><td><div class="rbar" style="width:100px"><i style="width:'+pct(g.priority)+'%;background:var(--c-amber)"></i></div><span class="faint mono">'+(g.priority||0).toFixed(2)+"</span></td>" +
-          "<td>" + esc(g.description) + "</td>" +
-          '<td><button class="gtopic" data-t="' + esc(g.topic_id) + '" title="Scope gaps to this topic">' + esc(tname[g.topic_id] || "—") + "</button></td>" +
-          '<td><span class="gtype"><span class="sw" style="background:'+(GAP_COLOR[g.gap_type]||"var(--ink-faint)")+'"></span>'+esc(title_((g.gap_type||"").replace(/_/g," ")))+"</span></td>" +
+          "<td>" + mdInline(g.description) + "</td>" +
+          '<td><button class="gtopic" data-t="' + esc(g.topic_id) + '" title="' + esc(t("scope_gaps_btn")) + '">' + esc(tname[g.topic_id] || "—") + "</button></td>" +
+          '<td><span class="gtype"><span class="sw" style="background:'+(GAP_COLOR[g.gap_type]||"var(--ink-faint)")+'"></span>'+esc(GL[LANG][g.gap_type] || (g.gap_type || "").replace(/_/g, " "))+"</span></td>" +
           "<td>" + esc(day(g.discovered_at)) + "</td></tr>").join("")}
-      </tbody></table>` : nothing(state.topicFilter === "all" ? "No gaps recorded — run gap analysis on a topic." : "No gaps for this topic.")}
-    <div class="section-h">Reports</div>
+      </tbody></table>` : nothing(state.topicFilter === "all" ? t("no_gaps") : t("no_gaps_topic"))}
+    <div class="section-h">${esc(t("sec_reports"))}</div>
     ${reps.length ? shownReps.map((rep, i) =>
-        '<div class="rep-row"><span class="rt" data-rep="' + i + '">' + esc(rep.title) + "</span>" +
-        '<span class="rm">' + rep.sections.length + " sections · " + esc(day(rep.generated_at)) + "</span>" +
-        '<button class="readbtn" data-rep="' + i + '">Read</button></div>').join("") +
-      (reps.length > REPORTS_CAP && !state.reportsShowAll ? '<button class="btn ghost" id="rep-all">Show all ' + reps.length + " reports</button>" : "")
-      : nothing("No reports yet — generate one for a topic.")}`;
+        '<div class="rep-row"><span class="rt" data-rep="' + i + '">' + mdInline(rep.title) + "</span>" +
+        '<span class="rm">' + esc(fmt("rep_meta", { n: rep.sections.length, d: day(rep.generated_at) })) + "</span>" +
+        '<button class="readbtn" data-rep="' + i + '">' + esc(t("read_btn")) + "</button></div>").join("") +
+      (reps.length > REPORTS_CAP && !state.reportsShowAll ? '<button class="btn ghost" id="rep-all">' + esc(fmt("show_all_reps", { n: reps.length })) + "</button>" : "")
+      : nothing(t("no_reports"))}`;
 
   const tquery = $("t-query");
   if (tquery) tquery.addEventListener("input", () => {
@@ -883,16 +1965,858 @@ function drawResults() {
     el.addEventListener("click", () => openReader(resultsCache.reps[+el.dataset.rep])));
 }
 
+/* ───────────────────────── manual (11 languages) ───────────────────────── */
+/* CLI samples stay verbatim; only the prose is translated. Missing
+   languages fall back to English. */
+const MANUAL = {};
+MANUAL.en = `
+    <div>
+      <div class="panel">
+        <div class="ph">Quick start</div>
+        <p>One-time setup, then a loop of ingest, index, query.</p>
+        <pre>research init                        # workspace + config walkthrough
+research ingest "query"              # pull papers (default: all sources)
+research index                       # refresh the full-text index
+research query "query" --evidence    # search metadata + full text</pre>
+        <p class="dim">Every step is safe to re-run: ingest skips duplicates, the index syncs incrementally.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Getting papers in</div>
+        <ul>
+          <li><b>Web sources</b> — <span class="mono">--source</span> accepts <span class="mono">arxiv</span>, <span class="mono">s2</span>, <span class="mono">openalex</span>, <span class="mono">europepmc</span>, <span class="mono">preprints</span>, or <span class="mono">all</span>. A failing source warns and the rest continue.</li>
+          <li><b>Local PDFs</b> — <span class="mono">research ingest --source pdf --path file-or-dir</span>. Bodies are extracted with page anchors, so search results can cite a page.</li>
+          <li><b>arXiv PDFs, automatic</b> — after ingest, papers with an arXiv id but no full text get their PDF downloaded to <span class="mono">pdf/</span> next to the database and indexed. Already-covered papers are skipped.</li>
+          <li><b>Zotero</b> — <span class="mono">--source zotero</span> reads a running local Zotero API.</li>
+          <li><b>BibTeX / CSL-JSON</b> — <span class="mono">research import file.bib</span> (a Zotero library export works).</li>
+          <li><b>Re-extract</b> — <span class="mono">research reingest --missing-pages</span> rebuilds bodies that predate page markers, downloading from arXiv when no local PDF exists.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <div class="ph">Reading workflow</div>
+        <p>Track progress in the <b>Papers</b> table: the stepper sets reading status (unread through abandoned), the stars set a 1–5 rating. Also scriptable:</p>
+        <pre>research read &lt;id&gt; --status completed --rating 4
+research read &lt;id&gt; --body             # print stored full text</pre>
+      </div>
+      <div class="panel">
+        <div class="ph">Topics, gaps, reports</div>
+        <pre>research topics add "Topic name"
+research topics add "Sub" --parent &lt;topic-id&gt;
+research ingest "query" --topic &lt;topic-id&gt;
+research gaps --topic &lt;topic-id&gt;      # LLM knowledge-gap analysis
+research report --topic a,b --title "..."</pre>
+        <p class="dim">gaps and report need an <span class="mono">[llm]</span> section in the config; without one they return placeholders.</p>
+      </div>
+    </div>
+    <div>
+      <div class="panel">
+        <div class="ph">This dashboard</div>
+        <ul>
+          <li><b>Overview</b> — library size, reading depth, pipeline funnel, topic coverage.</li>
+          <li><b>Papers</b> — the library table; click a row for the detail modal, open the built-in reader for page-anchored bodies or the stored PDF.</li>
+          <li><b>Pipeline</b> — where every paper sits from discovered to deep read.</li>
+          <li><b>History</b> — a reverse-chronological feed of everything that happened.</li>
+          <li><b>Results</b> — knowledge gaps and generated reports.</li>
+          <li><b>Config</b> — edit <span class="mono">[llm]</span>, workspace path, and dashboard bind settings. Binding off 127.0.0.1 requires a token.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <div class="ph">Search index</div>
+        <p>Search is FTS5 full-text over title, abstract, notes, tags, keywords, and extracted body. The index is maintained automatically on every write.</p>
+        <pre>research index --rebuild     # force a full rebuild
+research enrich             # add search keywords</pre>
+        <p class="dim">Keywords cover the words a paper does <i>not</i> contain — synonyms, expanded acronyms, alternative phrasings — so a query worded differently from the abstract still finds it. <span class="mono">research enrich</span> uses <span class="mono">[llm]</span> when configured; without one it lists the papers needing keywords for an agent to fill in.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Zotero write-back</div>
+        <pre>research export --to zotero --apply</pre>
+        <p class="dim">Dry-run by default; tags are matched by DOI. CLI-only by design.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Agent mode (MCP)</div>
+        <pre>research mcp</pre>
+        <p>Runs a stdio MCP server so hosts like Claude Code or Codex can drive the whole tool. Point the host at this binary and command.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Config file</div>
+        <p><span class="mono">~/.research/config.toml</span> — two sections: <span class="mono">[llm]</span> (provider, model, the key's <i>env var name</i>) and <span class="mono">[dashboard]</span> (host, port, token). Secrets are never written to the file.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Source</div>
+        <p>Open source at <a href="https://github.com/epicsagas/research-agent" target="_blank" rel="noopener">github.com/epicsagas/research-agent</a> — issues and stars welcome.</p>
+      </div>
+    </div>`;
+MANUAL.ko = `
+    <div>
+      <div class="panel">
+        <div class="ph">빠른 시작</div>
+        <p>한 번 설정한 뒤 수집 → 색인 → 검색 루프.</p>
+        <pre>research init                        # 워크스페이스 + 설정 안내
+research ingest "query"              # 논문 수집 (기본: 전체 소스)
+research index                       # 전문 색인 갱신
+research query "query" --evidence    # 메타데이터 + 본문 검색</pre>
+        <p class="dim">모든 단계는 재실행해도 안전 — ingest는 중복을 건너뛰고, 색인은 증분 동기화합니다.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">논문 수집</div>
+        <ul>
+          <li><b>웹 소스</b> — <span class="mono">--source</span>에 <span class="mono">arxiv</span>, <span class="mono">s2</span>, <span class="mono">openalex</span>, <span class="mono">europepmc</span>, <span class="mono">preprints</span>, <span class="mono">all</span> 지정. 실패한 소스는 경고만 하고 나머지는 계속합니다.</li>
+          <li><b>로컬 PDF</b> — <span class="mono">research ingest --source pdf --path file-or-dir</span>. 본문을 페이지 앵커와 함께 추출해 검색 결과가 페이지를 인용할 수 있습니다.</li>
+          <li><b>arXiv PDF 자동 수집</b> — ingest 후 arXiv id는 있지만 본문이 없는 논문은 PDF를 DB 옆 <span class="mono">pdf/</span>에 내려받아 색인합니다. 이미 처리된 논문은 건너뜁니다.</li>
+          <li><b>Zotero</b> — <span class="mono">--source zotero</span>는 실행 중인 로컬 Zotero API를 읽습니다.</li>
+          <li><b>BibTeX / CSL-JSON</b> — <span class="mono">research import file.bib</span> (Zotero 라이브러리 내보내기도 됩니다).</li>
+          <li><b>재추출</b> — <span class="mono">research reingest --missing-pages</span>는 페이지 마커 이전 본문을 다시 만들고, 로컬 PDF가 없으면 arXiv에서 내려받습니다.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <div class="ph">읽기 워크플로</div>
+        <p><b>논문</b> 표에서 진행 상황을 기록합니다. 상태 선택 메뉴로 읽기 상태(읽기 전~중단)를, 별점으로 1~5점 평점을 남기세요. CLI로도 가능합니다:</p>
+        <pre>research read &lt;id&gt; --status completed --rating 4
+research read &lt;id&gt; --body             # 저장된 본문 출력</pre>
+      </div>
+      <div class="panel">
+        <div class="ph">주제·갭·리포트</div>
+        <pre>research topics add "주제 이름"
+research topics add "하위" --parent &lt;topic-id&gt;
+research ingest "query" --topic &lt;topic-id&gt;
+research gaps --topic &lt;topic-id&gt;      # LLM 지식 갭 분석
+research report --topic a,b --title "..."</pre>
+        <p class="dim">gaps와 report는 설정에 <span class="mono">[llm]</span> 섹션이 필요합니다. 없으면 자리표시자를 반환합니다.</p>
+      </div>
+    </div>
+    <div>
+      <div class="panel">
+        <div class="ph">대시보드 둘러보기</div>
+        <ul>
+          <li><b>개요</b> — 라이브러리 규모, 읽은 정도, 파이프라인 퍼널, 주제 커버리지.</li>
+          <li><b>논문</b> — 라이브러리 표. 행을 클릭하면 상세 모달이 열리고, 내장 리더로 페이지 앵커가 붙은 본문이나 저장된 PDF를 읽을 수 있습니다.</li>
+          <li><b>파이프라인</b> — 발견부터 정독까지 모든 논문이 지금 어디에 있는지.</li>
+          <li><b>기록</b> — 그동안 일어난 일을 최신순으로 보여주는 피드.</li>
+          <li><b>결과</b> — 지식 갭과 생성된 리포트.</li>
+          <li><b>설정</b> — <span class="mono">[llm]</span>, 워크스페이스 경로, 대시보드 바인드 설정 편집. 127.0.0.1 밖으로 열 때는 토큰이 필요합니다.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <div class="ph">검색 색인</div>
+        <p>검색은 제목·초록·메모·태그·키워드·추출 본문에 대한 FTS5 전문 검색입니다. 색인은 모든 쓰기에서 자동으로 유지됩니다.</p>
+        <pre>research index --rebuild     # 전체 재구축
+research enrich             # 검색 키워드 추가</pre>
+        <p class="dim">키워드는 논문에 <i>없는</i> 단어 — 동의어, 약어 풀네임, 다른 표현 — 를 보완해 주기 때문에, 초록과 다른 표현으로 검색해도 찾아집니다. <span class="mono">research enrich</span>는 <span class="mono">[llm]</span>이 설정되어 있으면 LLM을 쓰고, 없으면 키워드가 필요한 논문 목록을 보여줍니다(에이전트가 채워 넣습니다).</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Zotero 쓰기</div>
+        <pre>research export --to zotero --apply</pre>
+        <p class="dim">기본은 드라이런이며 태그는 DOI로 매칭합니다. CLI 전용입니다.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">에이전트 모드 (MCP)</div>
+        <pre>research mcp</pre>
+        <p>stdio MCP 서버를 띄워 Claude Code·Codex 같은 호스트가 도구 전체를 구동할 수 있습니다. 호스트가 이 바이너리와 명령을 가리키게 하세요.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">설정 파일</div>
+        <p><span class="mono">~/.research/config.toml</span> — 두 섹션: <span class="mono">[llm]</span> (프로바이더, 모델, 키의 <i>환경변수 이름</i>)과 <span class="mono">[dashboard]</span> (호스트, 포트, 토큰). 비밀값은 파일에 쓰지 않습니다.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">소스</div>
+        <p><a href="https://github.com/epicsagas/research-agent" target="_blank" rel="noopener">github.com/epicsagas/research-agent</a>에서 오픈소스 — 이슈와 스타 환영합니다.</p>
+      </div>
+    </div>`;
+MANUAL.ja = `
+    <div>
+      <div class="panel">
+        <div class="ph">クイックスタート</div>
+        <p>最初の設定を済ませたら、あとは取り込み → 索引 → 検索のループです。</p>
+        <pre>research init                        # ワークスペース + 設定ガイド
+research ingest "query"              # 論文を取り込む（既定: 全ソース）
+research index                       # 全文索引を更新
+research query "query" --evidence    # メタデータ + 本文を検索</pre>
+        <p class="dim">どのステップも再実行して安全 — ingestは重複をスキップし、索引は差分だけ同期します。</p>
+      </div>
+      <div class="panel">
+        <div class="ph">論文の取り込み</div>
+        <ul>
+          <li><b>ウェブソース</b> — <span class="mono">--source</span> には <span class="mono">arxiv</span>・<span class="mono">s2</span>・<span class="mono">openalex</span>・<span class="mono">europepmc</span>・<span class="mono">preprints</span>・<span class="mono">all</span> を指定できます。失敗したソースは警告だけ出して、残りは続行します。</li>
+          <li><b>ローカルPDF</b> — <span class="mono">research ingest --source pdf --path file-or-dir</span>。本文はページ位置の目印付きで取り出されるので、検索結果がページを引用できます。</li>
+          <li><b>arXiv PDFの自動取得</b> — 取り込み後、arXiv IDはあるのに本文がない論文は、データベースの隣の <span class="mono">pdf/</span> にPDFを保存して索引します。処理済みの論文はスキップ。</li>
+          <li><b>Zotero</b> — <span class="mono">--source zotero</span> は動いているローカルZotero APIを読みます。</li>
+          <li><b>BibTeX / CSL-JSON</b> — <span class="mono">research import file.bib</span>（Zoteroの書き出しファイルも使えます）。</li>
+          <li><b>再取り込み</b> — <span class="mono">research reingest --missing-pages</span> はページ印より前の本文を作り直し、ローカルPDFがなければarXivから取得します。</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <div class="ph">読書の進め方</div>
+        <p><b>論文</b>テーブルで進捗を記録します。状態メニューで読書状態（未読〜中断）を、星で1〜5の評価を。CLIでも操作できます:</p>
+        <pre>research read &lt;id&gt; --status completed --rating 4
+research read &lt;id&gt; --body             # 保存した本文を出力</pre>
+      </div>
+      <div class="panel">
+        <div class="ph">トピック・ギャップ・レポート</div>
+        <pre>research topics add "トピック名"
+research topics add "サブ" --parent &lt;topic-id&gt;
+research ingest "query" --topic &lt;topic-id&gt;
+research gaps --topic &lt;topic-id&gt;      # LLMによる知識ギャップ分析
+research report --topic a,b --title "..."</pre>
+        <p class="dim">gaps と report には設定ファイルに <span class="mono">[llm]</span> セクションが必要です。ない場合はプレースホルダーを返します。</p>
+      </div>
+    </div>
+    <div>
+      <div class="panel">
+        <div class="ph">ダッシュボードの使い方</div>
+        <ul>
+          <li><b>概要</b> — ライブラリの規模、読みの深度、パイプラインの漏斗、トピックのカバレッジ。</li>
+          <li><b>論文</b> — ライブラリのテーブル。行をクリックすると詳細モーダルが開き、内蔵リーダーでページ印付きの本文や保存済みPDFを読めます。</li>
+          <li><b>パイプライン</b> — 発見から精読まで、各論文がいまどこにいるか。</li>
+          <li><b>履歴</b> — これまでの出来事を新しい順に並べたフィード。</li>
+          <li><b>結果</b> — 知識ギャップと生成済みレポート。</li>
+          <li><b>設定</b> — <span class="mono">[llm]</span>、ワークスペースのパス、ダッシュボードのバインド設定を編集。127.0.0.1 の外に開くにはトークンが必要です。</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <div class="ph">検索索引</div>
+        <p>検索はタイトル・要約・メモ・タグ・キーワード・抽出本文を対象にしたFTS5全文検索です。索引は書き込みのたびに自動で維持されます。</p>
+        <pre>research index --rebuild     # 全体を再構築
+research enrich             # 検索キーワードを追加</pre>
+        <p class="dim">キーワードは論文に<i>書かれていない</i>語 — 同義語、略語の展開形、別の言い回し — を補うものです。要約と違う語で検索してもヒットするのはこのためです。<span class="mono">research enrich</span> は <span class="mono">[llm]</span> があればLLMを使い、なければキーワードが要る論文の一覧を出します（エージェントが埋めます）。</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Zoteroへ書き戻し</div>
+        <pre>research export --to zotero --apply</pre>
+        <p class="dim">既定はドライラン。タグはDOIで対応づけます。CLI専用です。</p>
+      </div>
+      <div class="panel">
+        <div class="ph">エージェントモード（MCP）</div>
+        <pre>research mcp</pre>
+        <p>stdio MCPサーバーを立ち上げて、Claude CodeやCodexのようなホストから丸ごと操作できるようにします。ホストにこのバイナリとコマンドを向けてください。</p>
+      </div>
+      <div class="panel">
+        <div class="ph">設定ファイル</div>
+        <p><span class="mono">~/.research/config.toml</span> — セクションは2つ: <span class="mono">[llm]</span>（プロバイダー、モデル、キーの<i>環境変数名</i>）と <span class="mono">[dashboard]</span>（ホスト、ポート、トークン）。秘密の値がファイルに書かれることはありません。</p>
+      </div>
+      <div class="panel">
+        <div class="ph">ソース</div>
+        <p><a href="https://github.com/epicsagas/research-agent" target="_blank" rel="noopener">github.com/epicsagas/research-agent</a> で公開中 — issueとスターを歓迎します。</p>
+      </div>
+    </div>`;
+MANUAL["zh-Hans"] = `
+    <div>
+      <div class="panel">
+        <div class="ph">快速上手</div>
+        <p>一次性配置好，然后就是导入 → 索引 → 检索的循环。</p>
+        <pre>research init                        # 工作区 + 配置引导
+research ingest "query"              # 导入论文（默认：全部来源）
+research index                       # 刷新全文索引
+research query "query" --evidence    # 检索元数据 + 正文</pre>
+        <p class="dim">每一步都可以放心重跑：导入会跳过重复项，索引只做增量同步。</p>
+      </div>
+      <div class="panel">
+        <div class="ph">把论文导入进来</div>
+        <ul>
+          <li><b>在线来源</b> — <span class="mono">--source</span> 可选 <span class="mono">arxiv</span>、<span class="mono">s2</span>、<span class="mono">openalex</span>、<span class="mono">europepmc</span>、<span class="mono">preprints</span> 或 <span class="mono">all</span>。某个来源失败只会警告，其余照常继续。</li>
+          <li><b>本地 PDF</b> — <span class="mono">research ingest --source pdf --path file-or-dir</span>。正文会连同页码标记一起提取，搜索结果可以精确引用到页。</li>
+          <li><b>自动下载 arXiv PDF</b> — 导入之后，有 arXiv 编号但没有正文的论文会自动把 PDF 下载到数据库旁边的 <span class="mono">pdf/</span> 并建立索引。已处理过的会跳过。</li>
+          <li><b>Zotero</b> — <span class="mono">--source zotero</span> 读取正在运行的本地 Zotero API。</li>
+          <li><b>BibTeX / CSL-JSON</b> — <span class="mono">research import file.bib</span>（Zotero 导出的文件也可以）。</li>
+          <li><b>重新提取</b> — <span class="mono">research reingest --missing-pages</span> 会为缺少页码标记的旧正文重建，本地没有 PDF 时从 arXiv 下载。</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <div class="ph">阅读流程</div>
+        <p>在<b>论文</b>表格里记录进度：状态下拉框设置阅读状态（未读到放弃），星星打 1–5 分。也可以用命令行：</p>
+        <pre>research read &lt;id&gt; --status completed --rating 4
+research read &lt;id&gt; --body             # 输出已存正文</pre>
+      </div>
+      <div class="panel">
+        <div class="ph">主题、缺口、报告</div>
+        <pre>research topics add "主题名称"
+research topics add "子主题" --parent &lt;topic-id&gt;
+research ingest "query" --topic &lt;topic-id&gt;
+research gaps --topic &lt;topic-id&gt;      # LLM 知识缺口分析
+research report --topic a,b --title "..."</pre>
+        <p class="dim">gaps 和 report 需要配置文件里有 <span class="mono">[llm]</span> 段；没有的话只返回占位结果。</p>
+      </div>
+    </div>
+    <div>
+      <div class="panel">
+        <div class="ph">仪表盘导览</div>
+        <ul>
+          <li><b>概览</b> — 库的规模、阅读深度、流水线漏斗、主题覆盖率。</li>
+          <li><b>论文</b> — 文献库表格。点一行打开详情弹窗；内置阅读器可以看带页码标记的正文或已存的 PDF。</li>
+          <li><b>流水线</b> — 每篇论文从发现到精读走到了哪一步。</li>
+          <li><b>历史</b> — 所有动态按时间倒序排成的信息流。</li>
+          <li><b>结果</b> — 知识缺口和已生成的报告。</li>
+          <li><b>设置</b> — 编辑 <span class="mono">[llm]</span>、工作区路径和仪表盘监听配置。绑定到 127.0.0.1 之外需要令牌。</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <div class="ph">搜索索引</div>
+        <p>搜索基于 FTS5 全文索引，覆盖标题、摘要、笔记、标签、关键词和提取出的正文。每次写入都会自动维护索引。</p>
+        <pre>research index --rebuild     # 强制全量重建
+research enrich             # 补充搜索关键词</pre>
+        <p class="dim">关键词补的是论文里<i>没有出现</i>的词 — 同义词、缩写全称、另一种说法 — 这样即使用词和摘要不同也能搜到。<span class="mono">research enrich</span> 在配置了 <span class="mono">[llm]</span> 时用 LLM；否则会列出需要补关键词的论文，交给代理去填。</p>
+      </div>
+      <div class="panel">
+        <div class="ph">写回 Zotero</div>
+        <pre>research export --to zotero --apply</pre>
+        <p class="dim">默认只做演练；标签按 DOI 匹配。仅限命令行。</p>
+      </div>
+      <div class="panel">
+        <div class="ph">代理模式（MCP）</div>
+        <pre>research mcp</pre>
+        <p>启动一个 stdio MCP 服务器，让 Claude Code、Codex 这类宿主直接驱动整个工具。把宿主指到这个二进制和命令即可。</p>
+      </div>
+      <div class="panel">
+        <div class="ph">配置文件</div>
+        <p><span class="mono">~/.research/config.toml</span> — 两个段：<span class="mono">[llm]</span>（提供商、模型、密钥的<i>环境变量名</i>）和 <span class="mono">[dashboard]</span>（主机、端口、令牌）。密钥本体绝不会写进文件。</p>
+      </div>
+      <div class="panel">
+        <div class="ph">源码</div>
+        <p>开源在 <a href="https://github.com/epicsagas/research-agent" target="_blank" rel="noopener">github.com/epicsagas/research-agent</a> — 欢迎提 issue 和点星。</p>
+      </div>
+    </div>`;
+MANUAL["zh-Hant"] = `
+    <div>
+      <div class="panel">
+        <div class="ph">快速上手</div>
+        <p>一次性設定好，之後就是匯入 → 索引 → 搜尋的循環。</p>
+        <pre>research init                        # 工作區 + 設定引導
+research ingest "query"              # 匯入論文（預設：全部來源）
+research index                       # 更新全文索引
+research query "query" --evidence    # 搜尋詮釋資料 + 內文</pre>
+        <p class="dim">每個步驟都能放心重跑：匯入會跳過重複項，索引只做增量同步。</p>
+      </div>
+      <div class="panel">
+        <div class="ph">把論文收進來</div>
+        <ul>
+          <li><b>線上來源</b> — <span class="mono">--source</span> 可選 <span class="mono">arxiv</span>、<span class="mono">s2</span>、<span class="mono">openalex</span>、<span class="mono">europepmc</span>、<span class="mono">preprints</span> 或 <span class="mono">all</span>。某個來源失敗只會警告，其餘照常繼續。</li>
+          <li><b>本機 PDF</b> — <span class="mono">research ingest --source pdf --path file-or-dir</span>。內文會連同頁碼標記一起擷取，搜尋結果可以精確引用到頁。</li>
+          <li><b>自動下載 arXiv PDF</b> — 匯入之後，有 arXiv 編號但沒有內文的論文會自動把 PDF 下載到資料庫旁的 <span class="mono">pdf/</span> 並建立索引。處理過的會跳過。</li>
+          <li><b>Zotero</b> — <span class="mono">--source zotero</span> 讀取執行中的本機 Zotero API。</li>
+          <li><b>BibTeX / CSL-JSON</b> — <span class="mono">research import file.bib</span>（Zotero 匯出的檔案也可以）。</li>
+          <li><b>重新擷取</b> — <span class="mono">research reingest --missing-pages</span> 會為缺少頁碼標記的舊內文重建，本機沒有 PDF 時從 arXiv 下載。</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <div class="ph">閱讀流程</div>
+        <p>在<b>論文</b>表格裡記錄進度：狀態下拉選單設定閱讀狀態（未讀到放棄），星星打 1–5 分。也可以用命令列：</p>
+        <pre>research read &lt;id&gt; --status completed --rating 4
+research read &lt;id&gt; --body             # 輸出已存內文</pre>
+      </div>
+      <div class="panel">
+        <div class="ph">主題、缺口、報告</div>
+        <pre>research topics add "主題名稱"
+research topics add "子主題" --parent &lt;topic-id&gt;
+research ingest "query" --topic &lt;topic-id&gt;
+research gaps --topic &lt;topic-id&gt;      # LLM 知識缺口分析
+research report --topic a,b --title "..."</pre>
+        <p class="dim">gaps 和 report 需要設定檔裡有 <span class="mono">[llm]</span> 段；沒有的話只會回傳占位結果。</p>
+      </div>
+    </div>
+    <div>
+      <div class="panel">
+        <div class="ph">儀表板導覽</div>
+        <ul>
+          <li><b>總覽</b> — 書庫規模、閱讀深度、流程漏斗、主題覆蓋率。</li>
+          <li><b>論文</b> — 書庫表格。點一行開啟詳情視窗；內建閱讀器可以看帶頁碼標記的內文或已存的 PDF。</li>
+          <li><b>流程</b> — 每篇論文從發現到精讀走到了哪一步。</li>
+          <li><b>歷史</b> — 所有動態按時間倒序排成的資訊流。</li>
+          <li><b>結果</b> — 知識缺口和已產生的報告。</li>
+          <li><b>設定</b> — 編輯 <span class="mono">[llm]</span>、工作區路徑和儀表板監聽設定。綁定到 127.0.0.1 之外需要權杖。</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <div class="ph">搜尋索引</div>
+        <p>搜尋基於 FTS5 全文索引，涵蓋標題、摘要、筆記、標籤、關鍵字和擷取出的內文。每次寫入都會自動維護索引。</p>
+        <pre>research index --rebuild     # 強制全量重建
+research enrich             # 補充搜尋關鍵字</pre>
+        <p class="dim">關鍵字補的是論文裡<i>沒有出現</i>的詞 — 同義詞、縮寫全稱、另一種說法 — 這樣即使用詞和摘要不同也搜得到。<span class="mono">research enrich</span> 在設定了 <span class="mono">[llm]</span> 時用 LLM；否則會列出需要補關鍵字的論文，交給代理去填。</p>
+      </div>
+      <div class="panel">
+        <div class="ph">寫回 Zotero</div>
+        <pre>research export --to zotero --apply</pre>
+        <p class="dim">預設只做演練；標籤按 DOI 對應。僅限命令列。</p>
+      </div>
+      <div class="panel">
+        <div class="ph">代理模式（MCP）</div>
+        <pre>research mcp</pre>
+        <p>啟動一個 stdio MCP 伺服器，讓 Claude Code、Codex 這類宿主直接驅動整個工具。把宿主指向這個執行檔和命令即可。</p>
+      </div>
+      <div class="panel">
+        <div class="ph">設定檔</div>
+        <p><span class="mono">~/.research/config.toml</span> — 兩個段：<span class="mono">[llm]</span>（供應商、模型、金鑰的<i>環境變數名</i>）和 <span class="mono">[dashboard]</span>（主機、連接埠、權杖）。金鑰本體絕不會寫進檔案。</p>
+      </div>
+      <div class="panel">
+        <div class="ph">原始碼</div>
+        <p>開源在 <a href="https://github.com/epicsagas/research-agent" target="_blank" rel="noopener">github.com/epicsagas/research-agent</a> — 歡迎提 issue 和點星。</p>
+      </div>
+    </div>`;
+MANUAL.es = `
+    <div>
+      <div class="panel">
+        <div class="ph">Para empezar</div>
+        <p>Configúralo una vez y a vivir: el ciclo es importar → indexar → buscar.</p>
+        <pre>research init                        # espacio de trabajo + guía de configuración
+research ingest "query"              # trae artículos (por defecto: todas las fuentes)
+research index                       # refresca el índice de texto completo
+research query "query" --evidence    # busca en metadatos + cuerpo</pre>
+        <p class="dim">Todos los pasos se pueden repetir sin miedo: la importación salta duplicados y el índice se sincroniza por incremental.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Traer artículos</div>
+        <ul>
+          <li><b>Fuentes web</b> — <span class="mono">--source</span> acepta <span class="mono">arxiv</span>, <span class="mono">s2</span>, <span class="mono">openalex</span>, <span class="mono">europepmc</span>, <span class="mono">preprints</span> o <span class="mono">all</span>. Si una fuente falla avisa y el resto sigue.</li>
+          <li><b>PDFs locales</b> — <span class="mono">research ingest --source pdf --path file-or-dir</span>. El cuerpo se extrae con marcas de página, así las búsquedas pueden citar una página concreta.</li>
+          <li><b>PDFs de arXiv, automáticos</b> — tras importar, los artículos con ID de arXiv pero sin cuerpo descargan su PDF a <span class="mono">pdf/</span>, junto a la base, y se indexan. Los ya cubiertos se saltan.</li>
+          <li><b>Zotero</b> — <span class="mono">--source zotero</span> lee una API local de Zotero que esté corriendo.</li>
+          <li><b>BibTeX / CSL-JSON</b> — <span class="mono">research import file.bib</span> (sirve el export de una biblioteca Zotero).</li>
+          <li><b>Reextraer</b> — <span class="mono">research reingest --missing-pages</span> reconstruye cuerpos anteriores a las marcas de página, descargando de arXiv si no hay PDF local.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <div class="ph">Cómo leer</div>
+        <p>Registra tu avance en la tabla de <b>artículos</b>: el selector fija el estado de lectura (de sin leer a abandonado) y las estrellas ponen nota del 1 al 5. También por script:</p>
+        <pre>research read &lt;id&gt; --status completed --rating 4
+research read &lt;id&gt; --body             # imprime el cuerpo guardado</pre>
+      </div>
+      <div class="panel">
+        <div class="ph">Temas, lagunas, informes</div>
+        <pre>research topics add "Nombre del tema"
+research topics add "Sub" --parent &lt;topic-id&gt;
+research ingest "query" --topic &lt;topic-id&gt;
+research gaps --topic &lt;topic-id&gt;      # análisis de lagunas con LLM
+research report --topic a,b --title "..."</pre>
+        <p class="dim">gaps y report necesitan una sección <span class="mono">[llm]</span> en la configuración; sin ella devuelven marcadores de posición.</p>
+      </div>
+    </div>
+    <div>
+      <div class="panel">
+        <div class="ph">Este panel</div>
+        <ul>
+          <li><b>Resumen</b> — tamaño de la biblioteca, profundidad de lectura, embudo del flujo y cobertura por tema.</li>
+          <li><b>Artículos</b> — la tabla de la biblioteca; pulsa una fila para el detalle y usa el lector integrado para cuerpos con páginas o el PDF guardado.</li>
+          <li><b>Flujo</b> — dónde está cada artículo, del descubrimiento a la lectura profunda.</li>
+          <li><b>Historial</b> — todo lo que ha pasado, en orden inverso al tiempo.</li>
+          <li><b>Resultados</b> — lagunas de conocimiento e informes generados.</li>
+          <li><b>Ajustes</b> — edita <span class="mono">[llm]</span>, la ruta del espacio y el bind del panel. Publicar fuera de 127.0.0.1 exige token.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <div class="ph">Índice de búsqueda</div>
+        <p>La búsqueda es FTS5 de texto completo sobre título, resumen, notas, etiquetas, palabras clave y cuerpo extraído. El índice se mantiene solo con cada escritura.</p>
+        <pre>research index --rebuild     # reconstrucción completa forzada
+research enrich             # añade palabras clave</pre>
+        <p class="dim">Las palabras clave cubren los términos que el artículo <i>no</i> contiene — sinónimos, siglas desarrolladas, otras formulaciones — así una búsqueda redactada distinto al resumen también lo encuentra. <span class="mono">research enrich</span> usa <span class="mono">[llm]</span> si está configurado; si no, lista los artículos pendientes para que un agente los rellene.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Devolución a Zotero</div>
+        <pre>research export --to zotero --apply</pre>
+        <p class="dim">Por defecto solo simula; las etiquetas se emparejan por DOI. Solo CLI, a propósito.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Modo agente (MCP)</div>
+        <pre>research mcp</pre>
+        <p>Levanta un servidor MCP por stdio para que hosts como Claude Code o Codex manejen la herramienta entera. Apunta el host a este binario y comando.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Archivo de configuración</div>
+        <p><span class="mono">~/.research/config.toml</span> — dos secciones: <span class="mono">[llm]</span> (proveedor, modelo, el <i>nombre de la variable</i> de la clave) y <span class="mono">[dashboard]</span> (host, puerto, token). Los secretos jamás se escriben en el archivo.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Código fuente</div>
+        <p>Open source en <a href="https://github.com/epicsagas/research-agent" target="_blank" rel="noopener">github.com/epicsagas/research-agent</a> — issues y estrellas bienvenidas.</p>
+      </div>
+    </div>`;
+MANUAL.fr = `
+    <div>
+      <div class="panel">
+        <div class="ph">Démarrage rapide</div>
+        <p>Une configuration, puis une boucle : importer → indexer → chercher.</p>
+        <pre>research init                        # espace de travail + guide de config
+research ingest "query"              # importe des articles (défaut : toutes les sources)
+research index                       # rafraîchit l'index plein texte
+research query "query" --evidence    # cherche dans métadonnées + corps</pre>
+        <p class="dim">Chaque étape peut être relancée sans risque : l'import saute les doublons, l'index se synchronise par incrément.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Faire entrer les articles</div>
+        <ul>
+          <li><b>Sources web</b> — <span class="mono">--source</span> accepte <span class="mono">arxiv</span>, <span class="mono">s2</span>, <span class="mono">openalex</span>, <span class="mono">europepmc</span>, <span class="mono">preprints</span> ou <span class="mono">all</span>. Une source en échec prévient, les autres continuent.</li>
+          <li><b>PDF locaux</b> — <span class="mono">research ingest --source pdf --path file-or-dir</span>. Le corps est extrait avec des repères de page : les résultats peuvent citer une page précise.</li>
+          <li><b>PDF arXiv, automatiquement</b> — après l'import, les articles avec un ID arXiv mais sans corps voient leur PDF téléchargé dans <span class="mono">pdf/</span>, à côté de la base, puis indexé. Les déjà traités sont ignorés.</li>
+          <li><b>Zotero</b> — <span class="mono">--source zotero</span> lit une API Zotero locale en cours d'exécution.</li>
+          <li><b>BibTeX / CSL-JSON</b> — <span class="mono">research import file.bib</span> (l'export d'une bibliothèque Zotero convient).</li>
+          <li><b>Réextraire</b> — <span class="mono">research reingest --missing-pages</span> reconstruit les corps antérieurs aux repères de page, en téléchargeant depuis arXiv s'il n'y a pas de PDF local.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <div class="ph">Flux de lecture</div>
+        <p>Suivez votre avancement dans la table des <b>articles</b> : le sélecteur fixe le statut de lecture (de non lu à abandonné), les étoiles posent une note de 1 à 5. Scriptable aussi :</p>
+        <pre>research read &lt;id&gt; --status completed --rating 4
+research read &lt;id&gt; --body             # affiche le corps enregistré</pre>
+      </div>
+      <div class="panel">
+        <div class="ph">Sujets, écarts, rapports</div>
+        <pre>research topics add "Nom du sujet"
+research topics add "Sous-sujet" --parent &lt;topic-id&gt;
+research ingest "query" --topic &lt;topic-id&gt;
+research gaps --topic &lt;topic-id&gt;      # analyse des écarts par LLM
+research report --topic a,b --title "..."</pre>
+        <p class="dim">gaps et report exigent une section <span class="mono">[llm]</span> dans la configuration ; sans elle, ils renvoient des espaces réservés.</p>
+      </div>
+    </div>
+    <div>
+      <div class="panel">
+        <div class="ph">Ce tableau de bord</div>
+        <ul>
+          <li><b>Aperçu</b> — taille de la bibliothèque, profondeur de lecture, entonnoir du pipeline, couverture par sujet.</li>
+          <li><b>Articles</b> — la table de la bibliothèque ; cliquez une ligne pour le détail, et le lecteur intégré pour les corps paginés ou le PDF enregistré.</li>
+          <li><b>Pipeline</b> — où se trouve chaque article, de la découverte à la lecture approfondie.</li>
+          <li><b>Historique</b> — tout ce qui s'est passé, du plus récent au plus ancien.</li>
+          <li><b>Résultats</b> — écarts de connaissance et rapports générés.</li>
+          <li><b>Réglages</b> — éditez <span class="mono">[llm]</span>, le chemin de l'espace et le bind du tableau de bord. Publier au-delà de 127.0.0.1 exige un jeton.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <div class="ph">Index de recherche</div>
+        <p>La recherche est du FTS5 plein texte sur titre, résumé, notes, tags, mots-clés et corps extrait. L'index se maintient automatiquement à chaque écriture.</p>
+        <pre>research index --rebuild     # reconstruction complète forcée
+research enrich             # ajoute des mots-clés</pre>
+        <p class="dim">Les mots-clés couvrent les termes que l'article ne contient <i>pas</i> — synonymes, sigles développés, autres tournures — si bien qu'une requête formulée autrement que le résumé le trouve quand même. <span class="mono">research enrich</span> utilise <span class="mono">[llm]</span> s'il est configuré ; sinon il liste les articles à compléter pour qu'un agent le fasse.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Retour vers Zotero</div>
+        <pre>research export --to zotero --apply</pre>
+        <p class="dim">Simulation par défaut ; les tags sont appariés par DOI. CLI volontairement seul.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Mode agent (MCP)</div>
+        <pre>research mcp</pre>
+        <p>Lance un serveur MCP par stdio pour que des hôtes comme Claude Code ou Codex pilotent l'outil entier. Pointez l'hôte vers ce binaire et cette commande.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Fichier de configuration</div>
+        <p><span class="mono">~/.research/config.toml</span> — deux sections : <span class="mono">[llm]</span> (fournisseur, modèle, le <i>nom de la variable</i> de la clé) et <span class="mono">[dashboard]</span> (hôte, port, jeton). Les secrets ne sont jamais écrits dans le fichier.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Source</div>
+        <p>Open source sur <a href="https://github.com/epicsagas/research-agent" target="_blank" rel="noopener">github.com/epicsagas/research-agent</a> — issues et étoiles bienvenues.</p>
+      </div>
+    </div>`;
+MANUAL.de = `
+    <div>
+      <div class="panel">
+        <div class="ph">Schnellstart</div>
+        <p>Einmal einrichten, dann ein Loop: importieren → indizieren → suchen.</p>
+        <pre>research init                        # Arbeitsbereich + Konfigurationsguide
+research ingest "query"              # Artikel holen (Standard: alle Quellen)
+research index                       # Volltextindex auffrischen
+research query "query" --evidence    # Metadaten + Volltext durchsuchen</pre>
+        <p class="dim">Jeder Schritt darf wiederholt werden: Der Import überspringt Duplikate, der Index synchronisiert inkrementell.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Artikel hereinholen</div>
+        <ul>
+          <li><b>Web-Quellen</b> — <span class="mono">--source</span> nimmt <span class="mono">arxiv</span>, <span class="mono">s2</span>, <span class="mono">openalex</span>, <span class="mono">europepmc</span>, <span class="mono">preprints</span> oder <span class="mono">all</span>. Eine Ausfallquelle warnt nur, der Rest läuft weiter.</li>
+          <li><b>Lokale PDFs</b> — <span class="mono">research ingest --source pdf --path file-or-dir</span>. Der Text wird mit Seitenmarken extrahiert, Suchtreffer können eine Seite zitieren.</li>
+          <li><b>arXiv-PDFs, automatisch</b> — nach dem Import bekommen Artikel mit arXiv-ID, aber ohne Text, ihr PDF nach <span class="mono">pdf/</span> neben der Datenbank geladen und indiziert. Abgedeckte werden übersprungen.</li>
+          <li><b>Zotero</b> — <span class="mono">--source zotero</span> liest eine laufende lokale Zotero-API.</li>
+          <li><b>BibTeX / CSL-JSON</b> — <span class="mono">research import file.bib</span> (ein Zotero-Export funktioniert).</li>
+          <li><b>Neu extrahieren</b> — <span class="mono">research reingest --missing-pages</span> baut Texte ohne Seitenmarken neu auf und lädt von arXiv, wenn kein lokales PDF existiert.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <div class="ph">Lese-Workflow</div>
+        <p>Fortschritt in der <b>Artikel</b>-Tabelle festhalten: Das Auswahlmenü setzt den Lesestatus (von ungelesen bis abgebrochen), die Sterne vergeben 1–5 Punkte. Auch per Skript:</p>
+        <pre>research read &lt;id&gt; --status completed --rating 4
+research read &lt;id&gt; --body             # gespeicherten Text ausgeben</pre>
+      </div>
+      <div class="panel">
+        <div class="ph">Themen, Lücken, Berichte</div>
+        <pre>research topics add "Themenname"
+research topics add "Unterthema" --parent &lt;topic-id&gt;
+research ingest "query" --topic &lt;topic-id&gt;
+research gaps --topic &lt;topic-id&gt;      # Lückenanalyse per LLM
+research report --topic a,b --title "..."</pre>
+        <p class="dim">gaps und report brauchen eine <span class="mono">[llm]</span>-Sektion in der Konfiguration; ohne geben sie Platzhalter zurück.</p>
+      </div>
+    </div>
+    <div>
+      <div class="panel">
+        <div class="ph">Dieses Dashboard</div>
+        <ul>
+          <li><b>Übersicht</b> — Bibliotheksgröße, Lesetiefe, Ablauftrichter, Themenabdeckung.</li>
+          <li><b>Artikel</b> — die Bibliothekstabelle; eine Zeile öffnet die Details, der eingebaute Leser zeigt paginierte Texte oder das gespeicherte PDF.</li>
+          <li><b>Ablauf</b> — wo jeder Artikel steht, vom Fund bis zur vertieften Lektüre.</li>
+          <li><b>Verlauf</b> — alles, was passiert ist, in umgekehrter Chronologie.</li>
+          <li><b>Ergebnisse</b> — Wissenslücken und erzeugte Berichte.</li>
+          <li><b>Einstellungen</b> — <span class="mono">[llm]</span>, Arbeitsbereich-Pfad und Dashboard-Bind bearbeiten. Jenseits von 127.0.0.1 braucht es einen Schlüssel.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <div class="ph">Suchindex</div>
+        <p>Die Suche ist FTS5-Volltext über Titel, Abstract, Notizen, Tags, Keywords und extrahierten Text. Der Index wird bei jedem Schreibzugriff automatisch gepflegt.</p>
+        <pre>research index --rebuild     # vollständiger Neuaufbau
+research enrich             # Such-Keywords ergänzen</pre>
+        <p class="dim">Keywords decken die Wörter ab, die ein Artikel <i>nicht</i> enthält — Synonyme, ausgeschriebene Abkürzungen, andere Formulierungen — so findet eine anders formulierte Suche ihn trotzdem. <span class="mono">research enrich</span> nutzt <span class="mono">[llm]</span>, wenn eingerichtet; sonst listet es die Artikel auf, und ein Agent füllt die Keywords ein.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Zurückschreiben nach Zotero</div>
+        <pre>research export --to zotero --apply</pre>
+        <p class="dim">Standard ist der Probelauf; Tags werden per DOI zugeordnet. Bewusst nur CLI.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Agentenmodus (MCP)</div>
+        <pre>research mcp</pre>
+        <p>Startet einen stdio-MCP-Server, damit Hosts wie Claude Code oder Codex das ganze Werkzeug steuern können. Zeig dem Host dieses Binary und diesen Befehl.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Konfigurationsdatei</div>
+        <p><span class="mono">~/.research/config.toml</span> — zwei Sektionen: <span class="mono">[llm]</span> (Anbieter, Modell, der <i>Umgebungsvariablenname</i> des Schlüssels) und <span class="mono">[dashboard]</span> (Host, Port, Schlüssel). Geheimnisse landen nie in der Datei.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Quellcode</div>
+        <p>Open source auf <a href="https://github.com/epicsagas/research-agent" target="_blank" rel="noopener">github.com/epicsagas/research-agent</a> — Issues und Sterne willkommen.</p>
+      </div>
+    </div>`;
+MANUAL.pt = `
+    <div>
+      <div class="panel">
+        <div class="ph">Começo rápido</div>
+        <p>Configure uma vez e entre no ritmo: importar → indexar → buscar.</p>
+        <pre>research init                        # espaço de trabalho + guia de configuração
+research ingest "query"              # traz artigos (padrão: todas as fontes)
+research index                       # refresca o índice de texto completo
+research query "query" --evidence    # busca em metadados + corpo</pre>
+        <p class="dim">Todo passo pode ser repetido sem susto: a importação pula duplicados e o índice sincroniza por incremento.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Trazer artigos</div>
+        <ul>
+          <li><b>Fontes web</b> — <span class="mono">--source</span> aceita <span class="mono">arxiv</span>, <span class="mono">s2</span>, <span class="mono">openalex</span>, <span class="mono">europepmc</span>, <span class="mono">preprints</span> ou <span class="mono">all</span>. Se uma fonte falha, avisa e o resto segue.</li>
+          <li><b>PDFs locais</b> — <span class="mono">research ingest --source pdf --path file-or-dir</span>. O corpo é extraído com marcas de página, então a busca pode citar uma página exata.</li>
+          <li><b>PDFs do arXiv, automático</b> — depois de importar, artigos com ID do arXiv mas sem corpo baixam o PDF para <span class="mono">pdf/</span>, ao lado do banco, e entram no índice. Os já cobertos são pulados.</li>
+          <li><b>Zotero</b> — <span class="mono">--source zotero</span> lê uma API local do Zotero em execução.</li>
+          <li><b>BibTeX / CSL-JSON</b> — <span class="mono">research import file.bib</span> (o export de uma biblioteca Zotero serve).</li>
+          <li><b>Reextrair</b> — <span class="mono">research reingest --missing-pages</span> reconstrói corpos anteriores às marcas de página, baixando do arXiv quando não há PDF local.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <div class="ph">Fluxo de leitura</div>
+        <p>Registre o avanço na tabela de <b>artigos</b>: o seletor fixa o estado de leitura (de não lido a abandonado) e as estrelas dão nota de 1 a 5. Também por script:</p>
+        <pre>research read &lt;id&gt; --status completed --rating 4
+research read &lt;id&gt; --body             # imprime o corpo guardado</pre>
+      </div>
+      <div class="panel">
+        <div class="ph">Tópicos, lacunas, relatórios</div>
+        <pre>research topics add "Nome do tópico"
+research topics add "Sub" --parent &lt;topic-id&gt;
+research ingest "query" --topic &lt;topic-id&gt;
+research gaps --topic &lt;topic-id&gt;      # análise de lacunas com LLM
+research report --topic a,b --title "..."</pre>
+        <p class="dim">gaps e report pedem uma seção <span class="mono">[llm]</span> na configuração; sem ela devolvem marcadores de posição.</p>
+      </div>
+    </div>
+    <div>
+      <div class="panel">
+        <div class="ph">Este painel</div>
+        <ul>
+          <li><b>Visão geral</b> — tamanho do acervo, profundidade de leitura, funil do fluxo, cobertura por tópico.</li>
+          <li><b>Artigos</b> — a tabela do acervo; clique numa linha para os detalhes e use o leitor embutido para corpos paginados ou o PDF guardado.</li>
+          <li><b>Fluxo</b> — onde cada artigo está, da descoberta à leitura a fundo.</li>
+          <li><b>Histórico</b> — tudo que aconteceu, do mais recente para trás.</li>
+          <li><b>Resultados</b> — lacunas de conhecimento e relatórios gerados.</li>
+          <li><b>Ajustes</b> — edite <span class="mono">[llm]</span>, o caminho do espaço e o bind do painel. Abrir além de 127.0.0.1 exige token.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <div class="ph">Índice de busca</div>
+        <p>A busca é FTS5 de texto completo sobre título, resumo, notas, tags, palavras-chave e corpo extraído. O índice se mantém sozinho a cada escrita.</p>
+        <pre>research index --rebuild     # reconstrução completa forçada
+research enrich             # adiciona palavras-chave</pre>
+        <p class="dim">As palavras-chave cobrem os termos que o artigo <i>não</i> contém — sinônimos, siglas por extenso, outras formulações — assim uma busca redigida diferente do resumo também o encontra. <span class="mono">research enrich</span> usa <span class="mono">[llm]</span> quando configurado; sem ele, lista os artigos pendentes para um agente preencher.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">De volta ao Zotero</div>
+        <pre>research export --to zotero --apply</pre>
+        <p class="dim">Por padrão só ensaia; as tags são casadas por DOI. Só CLI, de propósito.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Modo agente (MCP)</div>
+        <pre>research mcp</pre>
+        <p>Sobe um servidor MCP por stdio para que hosts como Claude Code ou Codex manobrem a ferramenta inteira. Aponte o host para este binário e comando.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Arquivo de configuração</div>
+        <p><span class="mono">~/.research/config.toml</span> — duas seções: <span class="mono">[llm]</span> (provedor, modelo, o <i>nome da variável</i> da chave) e <span class="mono">[dashboard]</span> (host, porta, token). Segredos nunca vão para o arquivo.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Código-fonte</div>
+        <p>Open source em <a href="https://github.com/epicsagas/research-agent" target="_blank" rel="noopener">github.com/epicsagas/research-agent</a> — issues e estrelas bem-vindas.</p>
+      </div>
+    </div>`;
+MANUAL.ru = `
+    <div>
+      <div class="panel">
+        <div class="ph">Быстрый старт</div>
+        <p>Настроить один раз — и жить в цикле: импорт → индекс → поиск.</p>
+        <pre>research init                        # рабочая область + обзор настроек
+research ingest "query"              # подтянуть статьи (по умолчанию: все источники)
+research index                       # обновить полнотекстовый индекс
+research query "query" --evidence    # поиск по метаданным + тексту</pre>
+        <p class="dim">Любой шаг можно смело повторять: импорт пропускает дубликаты, индекс досинхронизируется по инкременту.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Как попадают статьи</div>
+        <ul>
+          <li><b>Веб-источники</b> — <span class="mono">--source</span> принимает <span class="mono">arxiv</span>, <span class="mono">s2</span>, <span class="mono">openalex</span>, <span class="mono">europepmc</span>, <span class="mono">preprints</span> или <span class="mono">all</span>. Упавший источник только предупредит — остальные продолжат.</li>
+          <li><b>Локальные PDF</b> — <span class="mono">research ingest --source pdf --path file-or-dir</span>. Текст извлекается с привязкой к страницам, поэтому поиск может цитировать конкретную страницу.</li>
+          <li><b>PDF с arXiv, автоматически</b> — после импорта статьям с arXiv-ID, но без текста, PDF скачивается в <span class="mono">pdf/</span> рядом с базой и индексируется. Уже покрытые пропускаются.</li>
+          <li><b>Zotero</b> — <span class="mono">--source zotero</span> читает работающий локальный API Zotero.</li>
+          <li><b>BibTeX / CSL-JSON</b> — <span class="mono">research import file.bib</span> (подойдёт экспорт библиотеки Zotero).</li>
+          <li><b>Переизвлечь</b> — <span class="mono">research reingest --missing-pages</span> заново собирает тексты без страничных меток, скачивая с arXiv, если локального PDF нет.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <div class="ph">Как читать</div>
+        <p>Отмечайте прогресс в таблице <b>статей</b>: селектор задаёт статус чтения (от «не прочитана» до «брошена»), звёзды — оценку от 1 до 5. Можно и из скрипта:</p>
+        <pre>research read &lt;id&gt; --status completed --rating 4
+research read &lt;id&gt; --body             # вывести сохранённый текст</pre>
+      </div>
+      <div class="panel">
+        <div class="ph">Темы, пробелы, отчёты</div>
+        <pre>research topics add "Название темы"
+research topics add "Подтема" --parent &lt;topic-id&gt;
+research ingest "query" --topic &lt;topic-id&gt;
+research gaps --topic &lt;topic-id&gt;      # анализ пробелов через LLM
+research report --topic a,b --title "..."</pre>
+        <p class="dim">Для gaps и report в конфиге нужна секция <span class="mono">[llm]</span>; без неё вернутся заглушки.</p>
+      </div>
+    </div>
+    <div>
+      <div class="panel">
+        <div class="ph">Эта панель</div>
+        <ul>
+          <li><b>Обзор</b> — размер библиотеки, глубина чтения, воронка конвейера, покрытие тем.</li>
+          <li><b>Статьи</b> — таблица библиотеки; клик по строке открывает карточку, встроенный читалка показывает текст с привязкой к страницам или сохранённый PDF.</li>
+          <li><b>Конвейер</b> — где находится каждая статья: от находки до глубокого изучения.</li>
+          <li><b>История</b> — лента всего происшедшего, от свежего к старому.</li>
+          <li><b>Результаты</b> — пробелы в знаниях и готовые отчёты.</li>
+          <li><b>Настройки</b> — правка <span class="mono">[llm]</span>, пути рабочей области и привязки панели. Открытие наружу, кроме 127.0.0.1, требует токен.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <div class="ph">Поисковый индекс</div>
+        <p>Поиск — полнотекстовый FTS5 по названию, аннотации, заметкам, тегам, ключевым словам и извлечённому тексту. Индекс поддерживается сам при каждой записи.</p>
+        <pre>research index --rebuild     # принудительная полная пересборка
+research enrich             # добавить поисковые ключевые слова</pre>
+        <p class="dim">Ключевые слова покрывают то, чего в статье <i>нет</i> — синонимы, развёрнутые аббревиатуры, другие формулировки — поэтому запрос, звучащий иначе, чем аннотация, её всё равно найдёт. <span class="mono">research enrich</span> при настроенном <span class="mono">[llm]</span> использует модель; без него печатает список статей, а ключевые слова добавляет агент.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Обратная запись в Zotero</div>
+        <pre>research export --to zotero --apply</pre>
+        <p class="dim">По умолчанию — пробный прогон; теги сопоставляются по DOI. Сознательно только CLI.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Режим агента (MCP)</div>
+        <pre>research mcp</pre>
+        <p>Поднимает MCP-сервер поверх stdio, чтобы хосты вроде Claude Code или Codex управляли инструментом целиком. Направьте хост на этот бинарник и команду.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Файл конфигурации</div>
+        <p><span class="mono">~/.research/config.toml</span> — две секции: <span class="mono">[llm]</span> (провайдер, модель, <i>имя переменной</i> с ключом) и <span class="mono">[dashboard]</span> (хост, порт, токен). Секреты в файл никогда не пишутся.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Исходники</div>
+        <p>Open source на <a href="https://github.com/epicsagas/research-agent" target="_blank" rel="noopener">github.com/epicsagas/research-agent</a> — welcome: issues и звёзды.</p>
+      </div>
+    </div>`;
+MANUAL.it = `
+    <div>
+      <div class="panel">
+        <div class="ph">Per cominciare</div>
+        <p>Si configura una volta, poi si gira in tondo: importa → indicizza → cerca.</p>
+        <pre>research init                        # area di lavoro + guida alla configurazione
+research ingest "query"              # porta articoli (predefinito: tutte le fonti)
+research index                       # rinfresca l'indice a testo pieno
+research query "query" --evidence    # cerca tra metadati + corpo</pre>
+        <p class="dim">Ogni passo si può rifare senza timore: l'import salta i duplicati e l'indice si sincronizza a incrementi.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Far entrare gli articoli</div>
+        <ul>
+          <li><b>Fonti web</b> — <span class="mono">--source</span> accetta <span class="mono">arxiv</span>, <span class="mono">s2</span>, <span class="mono">openalex</span>, <span class="mono">europepmc</span>, <span class="mono">preprints</span> o <span class="mono">all</span>. Se una fonte fallsce avvisa e le altre continuano.</li>
+          <li><b>PDF locali</b> — <span class="mono">research ingest --source pdf --path file-or-dir</span>. Il corpo viene estratto con i riferimenti di pagina, così i risultati possono citare una pagina precisa.</li>
+          <li><b>PDF da arXiv, in automatico</b> — dopo l'import, gli articoli con ID arXiv ma senza corpo si scaricano il PDF in <span class="mono">pdf/</span>, accanto al database, e finiscono nell'indice. Quelli già coperti vengono saltati.</li>
+          <li><b>Zotero</b> — <span class="mono">--source zotero</span> legge un'API Zotero locale in esecuzione.</li>
+          <li><b>BibTeX / CSL-JSON</b> — <span class="mono">research import file.bib</span> (va bene l'export di una libreria Zotero).</li>
+          <li><b>Riestrarre</b> — <span class="mono">research reingest --missing-pages</span> ricostruisce i corpi privi di riferimenti di pagina, scaricando da arXiv se manca un PDF locale.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <div class="ph">Come si legge</div>
+        <p>Registra i progressi nella tabella degli <b>articoli</b>: il menu a tendina fissa lo stato di lettura (da "da leggere" ad "abbandonato"), le stelle assegnano un voto da 1 a 5. Si può fare anche da script:</p>
+        <pre>research read &lt;id&gt; --status completed --rating 4
+research read &lt;id&gt; --body             # stampa il corpo salvato</pre>
+      </div>
+      <div class="panel">
+        <div class="ph">Argomenti, lacune, rapporti</div>
+        <pre>research topics add "Nome argomento"
+research topics add "Sotto" --parent &lt;topic-id&gt;
+research ingest "query" --topic &lt;topic-id&gt;
+research gaps --topic &lt;topic-id&gt;      # analisi delle lacune con LLM
+research report --topic a,b --title "..."</pre>
+        <p class="dim">gaps e report richiedono una sezione <span class="mono">[llm]</span> nella configurazione; senza restituiscono segnaposto.</p>
+      </div>
+    </div>
+    <div>
+      <div class="panel">
+        <div class="ph">Questo pannello</div>
+        <ul>
+          <li><b>Panoramica</b> — dimensione della libreria, profondità di lettura, imbuto del flusso, copertura per argomento.</li>
+          <li><b>Articoli</b> — la tabella della libreria; clicca una riga per i dettagli e usa il lettore integrato per i corpi con pagine o il PDF salvato.</li>
+          <li><b>Flusso</b> — dove si trova ogni articolo, dalla scoperta alla lettura approfondita.</li>
+          <li><b>Cronologia</b> — tutto ciò che è successo, dal più recente all'indietro.</li>
+          <li><b>Risultati</b> — lacune di conoscenza e rapporti generati.</li>
+          <li><b>Impostazioni</b> — modifica <span class="mono">[llm]</span>, il percorso dell'area e il bind del pannello. Esporsi oltre 127.0.0.1 richiede un token.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <div class="ph">Indice di ricerca</div>
+        <p>La ricerca è FTS5 a testo pieno su titolo, abstract, note, tag, parole chiave e corpo estratto. L'indice si mantiene da solo a ogni scrittura.</p>
+        <pre>research index --rebuild     # ricostruzione completa forzata
+research enrich             # aggiunge parole chiave</pre>
+        <p class="dim">Le parole chiave coprono i termini che l'articolo <i>non</i> contiene — sinonimi, acronimi per esteso, altre formulazioni — così una ricerca formulata diversamente dall'abstract lo trova lo stesso. <span class="mono">research enrich</span> usa <span class="mono">[llm]</span> se configurato; altrimenti elenca gli articoli a cui mancano parole chiave, e le aggiunge un agente.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Riscrittura su Zotero</div>
+        <pre>research export --to zotero --apply</pre>
+        <p class="dim">Per impostazione predefinita fa solo una prova a vuoto; i tag si abbinano via DOI. Solo CLI, di proposito.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Modalità agente (MCP)</div>
+        <pre>research mcp</pre>
+        <p>Avvia un server MCP via stdio perché host come Claude Code o Codex governino l'intero strumento. Punta l'host a questo binario e comando.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">File di configurazione</div>
+        <p><span class="mono">~/.research/config.toml</span> — due sezioni: <span class="mono">[llm]</span> (provider, modello, il <i>nome della variabile</i> della chiave) e <span class="mono">[dashboard]</span> (host, porta, token). I segreti non finiscono mai nel file.</p>
+      </div>
+      <div class="panel">
+        <div class="ph">Sorgenti</div>
+        <p>Open source su <a href="https://github.com/epicsagas/research-agent" target="_blank" rel="noopener">github.com/epicsagas/research-agent</a> — issue e stelle benvenute.</p>
+      </div>
+    </div>`;
+
 const pages = {
 
   overview: async () => {
     const chrome = await loadChrome();
-    if (!chrome) throw new Error("server unreachable");
+    if (!chrome) throw new Error(t("srv_unreachable"));
     const { ov, cf } = chrome;
     drawNav({ papers: ov.papers, gaps: ov.gaps });
     const [pipe, res] = await Promise.all([api("/api/pipeline"), api("/api/results")]);
 
     if (ov.papers === 0 && ov.topics === 0) { $("main").innerHTML = onboarding(cf); return; }
+
 
     const readFrac = ov.papers ? ov.read / ov.papers : 0;
     const ps = pipe.paper_status;
@@ -904,44 +2828,43 @@ const pages = {
     const latestRep = res.reports.slice().sort((a,b) => (b.generated_at||"").localeCompare(a.generated_at||""))[0];
 
     const html = `
-      <div class="page-head"><h1>Overview</h1>
-        <span class="page-sub">${esc(ov.papers)} papers across ${esc(ov.topics)} topics</span></div>
+      <div class="page-head"><h1>${esc(t("nav_overview"))}</h1>
+        <span class="page-sub">${esc(fmt("ov_sub", { p: nfmt(ov.papers), t: nfmt(ov.topics) }))}</span></div>
       <div class="tiles">
-        <div class="tile"><div class="n">${nfmt(ov.papers)}</div><div class="l">Papers</div>
+        <div class="tile"><div class="n">${nfmt(ov.papers)}</div><div class="l">${esc(t("t_papers"))}</div>
           <div class="x"><div class="depth-strip">${depthStrip(ps)}</div>
-          <div class="cap">${deepRead} read at depth</div></div></div>
-        <div class="tile"><div class="n">${nfmt(ov.read)}</div><div class="l">Completed</div>
+          <div class="cap">${esc(fmt("cap_depth", { n: deepRead }))}</div></div></div>
+        <div class="tile"><div class="n">${nfmt(ov.read)}</div><div class="l">${esc(t("t_completed"))}</div>
           <div class="x"><div class="microbar"><i style="width:${pct(readFrac)}%;background:var(--c-green)"></i></div>
-          <div class="cap">${pct(readFrac)}% of library · ${ov.queued} queued</div></div></div>
-        <div class="tile"><div class="n">${nfmt(ov.gaps)}</div><div class="l">Gaps</div>
+          <div class="cap">${esc(fmt("cap_completed", { p: pct(readFrac), n: nfmt(ov.queued) }))}</div></div></div>
+        <div class="tile"><div class="n">${nfmt(ov.gaps)}</div><div class="l">${esc(t("t_gaps"))}</div>
           <div class="x"><div class="microbar"><i style="width:${ov.gaps?pct(highGaps/ov.gaps):0}%;background:var(--c-amber)"></i></div>
-          <div class="cap">${highGaps} high priority</div></div></div>
-        <div class="tile"><div class="n">${nfmt(ov.reports)}</div><div class="l">Reports</div>
-          <div class="x"><div class="cap" style="margin-top:0">${latestRep ? esc(latestRep.title) + ", " + esc(day(latestRep.generated_at)) : "none yet"}</div></div></div>
-        <div class="tile"><div class="n">${res.topics.length ? pct(avgCov) + "%" : "—"}</div><div class="l">Avg coverage</div>
+          <div class="cap">${esc(fmt("cap_gaps", { n: highGaps }))}</div></div></div>
+        <div class="tile"><div class="n">${nfmt(ov.reports)}</div><div class="l">${esc(t("t_reports"))}</div>
+          <div class="x"><div class="cap" style="margin-top:0">${latestRep ? esc(latestRep.title) + ", " + esc(day(latestRep.generated_at)) : esc(t("none_yet"))}</div></div></div>
+        <div class="tile"><div class="n">${res.topics.length ? pct(avgCov) + "%" : "—"}</div><div class="l">${esc(t("t_avgcov"))}</div>
           <div class="x"><div class="microbar"><i style="width:${pct(avgCov)}%;background:var(--d4)"></i></div>
-          <div class="cap">${res.topics.length} ${res.topics.length === 1 ? "topic" : "topics"} tracked</div></div></div>
+          <div class="cap">${esc(fmt("cap_topics", { n: res.topics.length }))}</div></div></div>
       </div>
 
       <div class="cols" style="margin-top:30px">
         <div>
-          <div class="section-h">Reading depth</div>
+          <div class="section-h">${esc(t("sec_depth"))}</div>
           <div id="f-depth"></div>
-          <div class="section-h">Reading pipeline</div>
+          <div class="section-h">${esc(t("sec_reading"))}</div>
           <div id="f-reading"></div>
         </div>
         <div>
-          <div class="section-h">Topic coverage</div>
+          <div class="section-h">${esc(t("sec_coverage"))}</div>
           <div id="ov-topics">${topicRows(res.topics, true)}</div>
         </div>
       </div>`;
     $("main").innerHTML = html;
-    funnel("f-depth", DEPTHS, ps, DEPTH_COLOR, DEPTH_LABEL);
+    funnel("f-depth", DEPTHS, ps, DEPTH_COLOR, DL[LANG]);
     funnel("f-reading", READS.filter(s => s !== "abandoned"), pipe.reading_status,
-      [cssVar("--ramp-0"), cssVar("--ramp-1"), cssVar("--ramp-2"), cssVar("--ok")], READ_LABEL);
+      [cssVar("--ramp-0"), cssVar("--ramp-1"), cssVar("--ramp-2"), cssVar("--ok")], RL[LANG]);
     if (pipe.reading_status.abandoned) {
-      $("f-reading").innerHTML += '<div class="conv">' + nfmt(pipe.reading_status.abandoned) +
-        " abandoned along the way</div>";
+      $("f-reading").innerHTML += '<div class="conv">' + esc(fmt("conv_aband", { n: nfmt(pipe.reading_status.abandoned) })) + "</div>";
     }
   },
 
@@ -970,25 +2893,25 @@ const pages = {
     const pipe = await api("/api/pipeline");
     const aband = pipe.reading_status.abandoned || 0;
     $("main").innerHTML = `
-      <div class="page-head"><h1>Pipeline</h1>
-        <span class="page-sub">how papers move from discovery to deep reading</span></div>
+      <div class="page-head"><h1>${esc(t("nav_pipeline"))}</h1>
+        <span class="page-sub">${esc(t("pipe_sub"))}</span></div>
       <div class="cols">
         <div>
-          <div class="section-h">Reading depth</div>
+          <div class="section-h">${esc(t("sec_depth"))}</div>
           <div id="f-depth"></div>
-          <div class="section-h">Reading pipeline</div>
+          <div class="section-h">${esc(t("sec_reading"))}</div>
           <div id="f-reading"></div>
-          <div class="conv">${nfmt(aband)} abandoned along the way</div>
+          <div class="conv">${esc(fmt("conv_aband", { n: nfmt(aband) }))}</div>
         </div>
         <div>
-          <div class="section-h">Stage detail</div>
-          ${stageTable("Depth", DEPTHS, pipe.paper_status, DEPTH_LABEL)}
-          ${stageTable("Reading", READS, pipe.reading_status, READ_LABEL)}
+          <div class="section-h">${esc(t("sec_stage"))}</div>
+          ${stageTable(t("stage_depth"), DEPTHS, pipe.paper_status, DL[LANG])}
+          ${stageTable(t("stage_reading"), READS, pipe.reading_status, RL[LANG])}
         </div>
       </div>`;
-    funnel("f-depth", DEPTHS, pipe.paper_status, DEPTH_COLOR, DEPTH_LABEL);
+    funnel("f-depth", DEPTHS, pipe.paper_status, DEPTH_COLOR, DL[LANG]);
     funnel("f-reading", READS.filter(s => s !== "abandoned"), pipe.reading_status,
-      [cssVar("--ramp-0"), cssVar("--ramp-1"), cssVar("--ramp-2"), cssVar("--ok")], READ_LABEL);
+      [cssVar("--ramp-0"), cssVar("--ramp-1"), cssVar("--ramp-2"), cssVar("--ok")], RL[LANG]);
   },
 
   history: async () => {
@@ -996,13 +2919,13 @@ const pages = {
     $("main").innerHTML = '<div class="page-head"><h1>History</h1></div><div class="skel w60"></div>';
     const h = await api("/api/history");
     const streams = [
-      ["papers", h.papers_added, "paper added"],
-      ["gaps", h.gaps_found, "gap found"],
-      ["reports", h.reports_generated, "report generated"],
+      ["papers", h.papers_added],
+      ["gaps", h.gaps_found],
+      ["reports", h.reports_generated],
     ];
     const evs = [];
-    streams.forEach(([key, items, label]) => {
-      items.forEach(it => evs.push({ date: it.date, key, label, it }));
+    streams.forEach(([key, items]) => {
+      items.forEach(it => evs.push({ date: it.date, key, it }));
     });
     evs.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
     const shown = evs.filter(e => state.historyFilter === "all" || e.key === state.historyFilter);
@@ -1014,18 +2937,18 @@ const pages = {
     });
     const countFor = key => evs.filter(e => e.key === key).length;
     $("main").innerHTML = `
-      <div class="page-head"><h1>History</h1>
-        <span class="page-sub">${nfmt(evs.length)} events</span></div>
+      <div class="page-head"><h1>${esc(t("nav_history"))}</h1>
+        <span class="page-sub">${esc(fmt("hist_sub", { n: nfmt(evs.length) }))}</span></div>
       <div class="toolbar"><div class="chips">
-        <button class="chip ${state.historyFilter==="all"?"on":""}" data-hf="all">All <span class="cn">${evs.length}</span></button>
+        <button class="chip ${state.historyFilter==="all"?"on":""}" data-hf="all">${esc(t("all"))} <span class="cn">${evs.length}</span></button>
         ${["papers","gaps","reports"].map(k =>
           '<button class="chip '+(state.historyFilter===k?"on":"")+'" data-hf="'+k+'">'+
-          title_(k)+' <span class="cn">'+countFor(k)+'</span></button>').join("")}
+          esc(SL[LANG][k])+' <span class="cn">'+countFor(k)+'</span></button>').join("")}
       </div></div>
       ${shown.length ? [...byDay.entries()].map(([d, list]) =>
         '<div class="day"><span class="d">' + esc(d) + '</span><span class="n">' + list.length + "</span></div>" +
         list.map(e => eventRow(e)).join("")
-      ).join("") : '<div class="empty-block"><h3>No activity yet</h3><p>Ingest papers and run analysis to build a history.</p></div>'}`;
+      ).join("") : '<div class="empty-block"><h3>' + esc(t("no_activity_h")) + "</h3><p>" + esc(t("no_activity_p")) + "</p></div>"}`;
     $("main").querySelectorAll("[data-hf]").forEach(b =>
       b.addEventListener("click", () => { state.historyFilter = b.dataset.hf; render(); }));
     $("main").querySelectorAll("[data-paper]").forEach(a =>
@@ -1038,85 +2961,9 @@ const pages = {
     drawNav({});
     loadChrome();
     $("main").innerHTML = `
-      <div class="page-head"><h1>Manual</h1>
-        <span class="page-sub">driving research-agent from the terminal and from this desk</span></div>
-      <div class="cols manual" style="margin-top:24px">
-        <div>
-          <div class="panel">
-            <div class="ph">Quick start</div>
-            <p>One-time setup, then a loop of ingest, index, query.</p>
-            <pre>research init                        # workspace + config walkthrough
-research ingest "query"              # pull papers (default: all sources)
-research index                       # refresh the full-text index
-research query "query" --evidence    # search metadata + full text</pre>
-            <p class="dim">Every step is safe to re-run: ingest skips duplicates, the index syncs incrementally.</p>
-          </div>
-          <div class="panel">
-            <div class="ph">Getting papers in</div>
-            <ul>
-              <li><b>Web sources</b> — <span class="mono">--source</span> accepts <span class="mono">arxiv</span>, <span class="mono">s2</span>, <span class="mono">openalex</span>, <span class="mono">europepmc</span>, <span class="mono">preprints</span>, or <span class="mono">all</span>. A failing source warns and the rest continue.</li>
-              <li><b>Local PDFs</b> — <span class="mono">research ingest --source pdf --path file-or-dir</span>. Bodies are extracted with page anchors, so search results can cite a page.</li>
-              <li><b>arXiv PDFs, automatic</b> — after ingest, papers with an arXiv id but no full text get their PDF downloaded to <span class="mono">pdf/</span> next to the database and indexed. Already-covered papers are skipped.</li>
-              <li><b>Zotero</b> — <span class="mono">--source zotero</span> reads a running local Zotero API.</li>
-              <li><b>BibTeX / CSL-JSON</b> — <span class="mono">research import file.bib</span> (a Zotero library export works).</li>
-              <li><b>Re-extract</b> — <span class="mono">research reingest --missing-pages</span> rebuilds bodies that predate page markers, downloading from arXiv when no local PDF exists.</li>
-            </ul>
-          </div>
-          <div class="panel">
-            <div class="ph">Reading workflow</div>
-            <p>Track progress in the <b>Papers</b> table: the stepper sets reading status (unread through abandoned), the stars set a 1–5 rating. Also scriptable:</p>
-            <pre>research read &lt;id&gt; --status completed --rating 4
-research read &lt;id&gt; --body             # print stored full text</pre>
-          </div>
-          <div class="panel">
-            <div class="ph">Topics, gaps, reports</div>
-            <pre>research topics add "Topic name"
-research topics add "Sub" --parent &lt;topic-id&gt;
-research ingest "query" --topic &lt;topic-id&gt;
-research gaps --topic &lt;topic-id&gt;      # LLM knowledge-gap analysis
-research report --topic a,b --title "..."</pre>
-            <p class="dim">gaps and report need an <span class="mono">[llm]</span> section in the config; without one they return placeholders.</p>
-          </div>
-        </div>
-        <div>
-          <div class="panel">
-            <div class="ph">This dashboard</div>
-            <ul>
-              <li><b>Overview</b> — library size, reading depth, pipeline funnel, topic coverage.</li>
-              <li><b>Papers</b> — the library table; click a row for the drawer, open the built-in reader for page-anchored bodies or the stored PDF.</li>
-              <li><b>Pipeline</b> — where every paper sits from discovered to deep read.</li>
-              <li><b>History</b> — a reverse-chronological feed of everything that happened.</li>
-              <li><b>Results</b> — knowledge gaps and generated reports.</li>
-              <li><b>Config</b> — edit <span class="mono">[llm]</span>, workspace path, and dashboard bind settings. Binding off 127.0.0.1 requires a token.</li>
-            </ul>
-          </div>
-          <div class="panel">
-            <div class="ph">Search index</div>
-            <p>Search is FTS5 full-text over title, abstract, notes, tags, keywords, and extracted body. The index is maintained automatically on every write.</p>
-            <pre>research index --rebuild     # force a full rebuild
-research enrich             # add search keywords</pre>
-            <p class="dim">Keywords cover the words a paper does <i>not</i> contain — synonyms, expanded acronyms, alternative phrasings — so a query worded differently from the abstract still finds it. <span class="mono">research enrich</span> uses <span class="mono">[llm]</span> when configured; without one it lists the papers needing keywords for an agent to fill in.</p>
-          </div>
-          <div class="panel">
-            <div class="ph">Zotero write-back</div>
-            <pre>research export --to zotero --apply</pre>
-            <p class="dim">Dry-run by default; tags are matched by DOI. CLI-only by design.</p>
-          </div>
-          <div class="panel">
-            <div class="ph">Agent mode (MCP)</div>
-            <pre>research mcp</pre>
-            <p>Runs a stdio MCP server so hosts like Claude Code or Codex can drive the whole tool. Point the host at this binary and command.</p>
-          </div>
-          <div class="panel">
-            <div class="ph">Config file</div>
-            <p><span class="mono">~/.research/config.toml</span> — two sections: <span class="mono">[llm]</span> (provider, model, the key's <i>env var name</i>) and <span class="mono">[dashboard]</span> (host, port, token). Secrets are never written to the file.</p>
-          </div>
-          <div class="panel">
-            <div class="ph">Source</div>
-            <p>Open source at <a href="https://github.com/epicsagas/research-agent" target="_blank" rel="noopener">github.com/epicsagas/research-agent</a> — issues and stars welcome.</p>
-          </div>
-        </div>
-      </div>`;
+      <div class="page-head"><h1>${esc(t("nav_manual"))}</h1>
+        <span class="page-sub">${esc(t("manual_sub"))}</span></div>
+      <div class="cols manual" style="margin-top:24px">${MANUAL[LANG] || MANUAL.en}</div>`;
   },
 
   results: async () => {
@@ -1141,71 +2988,71 @@ research enrich             # add search keywords</pre>
     const dash = cf.dashboard;
     const keyStatus = llm
       ? '<span class="dot ' + (llm.api_key_set ? "ok" : "bad") + '" style="display:inline-block;margin-right:7px"></span>' +
-        (llm.api_key_set ? "key resolved" : "key missing from environment")
-      : '<span class="dot dim2" style="display:inline-block;margin-right:7px"></span>not configured';
+        esc(llm.api_key_set ? t("key_ok") : t("key_missing"))
+      : '<span class="dot dim2" style="display:inline-block;margin-right:7px"></span>' + esc(t("key_unset"));
     $("main").innerHTML = `
-      <div class="page-head"><h1>Config</h1>
-        <span class="page-sub">workspace settings — saved to <span class="mono">~/.research/config.toml</span></span></div>
-      ${llm && !llm.api_key_set ? '<div class="alert">' + ICON.warn + "<div><b>" + esc(llm.api_key_env) + "</b> is not set in this shell. Export it, then restart the dashboard so the CLI tools pick it up too.</div></div>" : ""}
+      <div class="page-head"><h1>${esc(t("nav_config"))}</h1>
+        <span class="page-sub">${t("cfg_sub")}</span></div>
+      ${llm && !llm.api_key_set ? '<div class="alert">' + ICON.warn + "<div>" + fmt("cfg_alert", { env: "<b>" + esc(llm.api_key_env) + "</b>" }) + "</div></div>" : ""}
       <div class="panel">
-        <div class="ph"><span style="margin-right:6px">LLM</span>${keyStatus}</div>
-        <p class="dim" style="margin:2px 0 14px;font-size:13px">Used by gap analysis and report generation. The key itself stays in your environment — only its name is stored.</p>
+        <div class="ph"><span style="margin-right:6px">${esc(t("p_llm"))}</span>${keyStatus}</div>
+        <p class="dim" style="margin:2px 0 14px;font-size:13px">${esc(t("cfg_llm_desc"))}</p>
         <div class="form">
-          <label>Provider<input id="cfg-provider" placeholder="anthropic" value="${llm ? esc(llm.provider) : ""}"></label>
-          <label>Model<input id="cfg-model" list="cfg-model-list" placeholder="claude-sonnet-4-6" value="${llm ? esc(llm.model) : ""}">
+          <label>${esc(t("cfg_provider"))}<input id="cfg-provider" placeholder="anthropic" value="${llm ? esc(llm.provider) : ""}"></label>
+          <label>${esc(t("cfg_model"))}<input id="cfg-model" list="cfg-model-list" placeholder="claude-sonnet-4-6" value="${llm ? esc(llm.model) : ""}">
             <datalist id="cfg-model-list"></datalist></label>
-          <label>API key env<input id="cfg-env" class="mono" placeholder="ANTHROPIC_API_KEY" value="${llm ? esc(llm.api_key_env) : ""}"></label>
+          <label>${esc(t("cfg_env"))}<input id="cfg-env" class="mono" placeholder="ANTHROPIC_API_KEY" value="${llm ? esc(llm.api_key_env) : ""}"></label>
         </div>
         <div class="form" style="grid-template-columns:1fr auto;align-items:end;margin-top:12px">
-          <label>Base URL <span class="faint">(OpenAI-compatible; blank = provider default)</span>
+          <label>${esc(t("cfg_base"))} <span class="faint">${esc(t("cfg_base_hint"))}</span>
             <input id="cfg-base" class="mono" placeholder="https://api.openai.com/v1" value="${llm && llm.base_url ? esc(llm.base_url) : ""}"></label>
-          <button class="btn ghost" id="cfg-load-models">Load model list</button>
+          <button class="btn ghost" id="cfg-load-models">${esc(t("cfg_load_models"))}</button>
         </div>
         <div style="display:flex;gap:8px;margin-top:14px;align-items:center">
-          <button class="btn" id="cfg-save">Save LLM settings</button>
-          ${llm ? '<button class="btn ghost" id="cfg-remove">Remove</button>' : ""}
+          <button class="btn" id="cfg-save">${esc(t("cfg_save"))}</button>
+          ${llm ? '<button class="btn ghost" id="cfg-remove">' + esc(t("cfg_remove")) + "</button>" : ""}
           <span class="faint" style="font-size:12px" id="cfg-hint"></span>
         </div>
       </div>
 
       <div class="panel">
-        <div class="ph">Workspace</div>
-        <p class="dim" style="margin:2px 0 14px;font-size:13px">Where the library database lives. Takes effect when the dashboard restarts.</p>
+        <div class="ph">${esc(t("p_workspace"))}</div>
+        <p class="dim" style="margin:2px 0 14px;font-size:13px">${esc(t("ws_desc"))}</p>
         <div class="form" style="grid-template-columns:1fr">
-          <label>Database file<input id="ws-path" class="mono" placeholder="~/.research/research.db" value="${esc(cf.configured_database_path)}"></label>
+          <label>${esc(t("ws_db"))}<input id="ws-path" class="mono" placeholder="~/.research/research.db" value="${esc(cf.configured_database_path)}"></label>
         </div>
       </div>
 
       <div class="panel">
-        <div class="ph">Dashboard server</div>
-        <p class="dim" style="margin:2px 0 14px;font-size:13px">Serving on <span class="mono">${esc(location.host)}</span>. Exposing to the network requires the access token below; MCP is unaffected — it runs over stdio inside your agent process and never opens a port.</p>
+        <div class="ph">${esc(t("p_server"))}</div>
+        <p class="dim" style="margin:2px 0 14px;font-size:13px">${fmt("srv_desc", { host: esc(location.host) })}</p>
         <div class="form">
-          <label>Bind address<select id="srv-host">
-            <option value="127.0.0.1" ${dash.host === "127.0.0.1" ? "selected" : ""}>localhost only</option>
-            <option value="0.0.0.0" ${dash.host === "0.0.0.0" ? "selected" : ""}>0.0.0.0 — network (token required)</option>
+          <label>${esc(t("srv_bind"))}<select id="srv-host">
+            <option value="127.0.0.1" ${dash.host === "127.0.0.1" ? "selected" : ""}>${esc(t("srv_local"))}</option>
+            <option value="0.0.0.0" ${dash.host === "0.0.0.0" ? "selected" : ""}>${esc(t("srv_net"))}</option>
           </select></label>
-          <label>Port<input id="srv-port" type="number" min="1" max="65535" value="${dash.port}"></label>
-          <label>Access token${dash.token_set ? "" : ' <span class="faint">(generated on network bind)</span>'}
+          <label>${esc(t("srv_port"))}<input id="srv-port" type="number" min="1" max="65535" value="${dash.port}"></label>
+          <label>${esc(t("srv_token"))}${dash.token_set ? "" : ' <span class="faint">' + esc(t("srv_token_gen")) + "</span>"}
             ${dash.token_set
-              ? '<div style="display:flex;gap:6px"><input id="srv-token" class="mono" readonly value="' + esc(dash.token) + '"><button class="btn ghost" id="srv-copy-token" title="Copy token">' + ICON.copy + '</button></div>'
-              : '<input id="srv-token" class="mono" placeholder="(none — localhost only)" readonly>'}
+              ? '<div style="display:flex;gap:6px"><input id="srv-token" class="mono" readonly value="' + esc(dash.token) + '"><button class="btn ghost" id="srv-copy-token" title="' + esc(t("srv_token")) + '">' + ICON.copy + '</button></div>'
+              : '<input id="srv-token" class="mono" placeholder="' + esc(t("srv_token_none")) + '" readonly>'}
           </label>
         </div>
         <div style="display:flex;gap:8px;margin-top:14px;align-items:center">
-          <button class="btn" id="srv-save">Save settings</button>
-          <button class="btn" id="srv-restart">Save &amp; restart dashboard</button>
+          <button class="btn" id="srv-save">${esc(t("srv_save"))}</button>
+          <button class="btn" id="srv-restart">${t("srv_restart")}</button>
           <span class="faint" style="font-size:12px" id="srv-hint"></span>
         </div>
       </div>`;
     $("main").querySelectorAll("[data-copy]").forEach(b =>
-      b.addEventListener("click", () => copyText(b.dataset.copy, "Path")));
+      b.addEventListener("click", () => copyText(b.dataset.copy, t("ws_db"))));
 
     const readLlm = () => {
       const provider = $("cfg-provider").value.trim();
       const model = $("cfg-model").value.trim();
       const env = $("cfg-env").value.trim();
       const base = $("cfg-base").value.trim();
-      if (!provider || !model || !env) { toast("Provider, model, and key name are all required", true); return null; }
+      if (!provider || !model || !env) { toast(t("toast_required"), true); return null; }
       return { provider, model, api_key_env: env, base_url: base || null };
     };
     const readDashboard = () => ({
@@ -1223,7 +3070,7 @@ research enrich             # add search keywords</pre>
     };
     const saveServer = async () => {
       const body = { workspace: { database_path: $("ws-path").value.trim() }, dashboard: readDashboard() };
-      if (!body.workspace.database_path) { toast("Database path is required", true); return false; }
+      if (!body.workspace.database_path) { toast(t("toast_db_required"), true); return false; }
       try {
         await api("/api/config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
         return true;
@@ -1231,28 +3078,28 @@ research enrich             # add search keywords</pre>
     };
     $("cfg-save").addEventListener("click", () => {
       const llmValue = readLlm();
-      if (llmValue) saveLlm(llmValue, "LLM settings saved");
+      if (llmValue) saveLlm(llmValue, t("toast_llm_saved"));
     });
     const rmBtn = $("cfg-remove");
-    if (rmBtn) rmBtn.addEventListener("click", () => saveLlm(null, "LLM settings removed"));
+    if (rmBtn) rmBtn.addEventListener("click", () => saveLlm(null, t("toast_llm_removed")));
 
     $("cfg-load-models").addEventListener("click", async () => {
       const hint = $("cfg-hint");
-      hint.textContent = "loading models…";
+      hint.textContent = t("loading_models");
       try {
         const d = await api("/api/models");
         const list = $("cfg-model-list");
         list.innerHTML = d.models.map(m => "<option value=\"" + esc(m) + "\"></option>").join("");
-        hint.textContent = d.models.length + " models loaded";
+        hint.textContent = fmt("models_loaded", { n: d.models.length });
       } catch (e) { hint.textContent = ""; toast(e.message, true); }
     });
 
     const copyBtn = $("srv-copy-token");
-    if (copyBtn) copyBtn.addEventListener("click", () => copyText($("srv-token").value, "Token"));
+    if (copyBtn) copyBtn.addEventListener("click", () => copyText($("srv-token").value, t("srv_token")));
 
     $("srv-restart").addEventListener("click", async () => {
       if (!(await saveServer())) return;
-      $("srv-hint").textContent = "restarting…";
+      $("srv-hint").textContent = t("restarting");
       try { await api("/api/restart", { method: "POST" }); } catch {}
       // Poll until the fresh instance answers, then reload the app.
       for (let i = 0; i < 40; i++) {
@@ -1260,7 +3107,7 @@ research enrich             # add search keywords</pre>
         try { await fetch("/api/overview"); location.reload(); return; } catch {}
       }
       $("srv-hint").textContent = "";
-      toast("Dashboard did not come back — start it manually with `research dashboard`", true);
+      toast(t("restart_fail"), true);
     });
   },
 };
@@ -1284,14 +3131,14 @@ function stageTable(title, stages, counts, labels) {
 
 function topicRows(topics, compact) {
   if (!topics.length) return "";
-  return topics.map(t => {
-    const st = t.state;
+  return topics.map(tp => {
+    const st = tp.state;
     const cov = st ? st.coverage_score : 0;
-    return '<div class="topic-row"><span class="indent" style="--depth:' + (t.depth || 0) + '"></span>' +
+    return '<div class="topic-row"><span class="indent" style="--depth:' + (tp.depth || 0) + '"></span>' +
       '<div class="ringwrap">' + ring(null, 18, cov) + '<span class="pct">' + pct(cov) + "%</span></div>" +
-      '<div><div class="nm">' + esc(t.name) + "</div>" +
-      (compact ? "" : '<div class="pt-sub">' + (st ? nfmt(st.papers_read) + " read · " + nfmt(st.papers_queued) + " queued" : "no analysis yet") + "</div>") + "</div>" +
-      '<div class="meta">' + (st ? nfmt(st.gaps_identified) + " gaps" : "") + "</div></div>";
+      '<div><div class="nm">' + esc(tp.name) + "</div>" +
+      (compact ? "" : '<div class="pt-sub">' + esc(st ? fmt("topic_read", { n: nfmt(st.papers_read), m: nfmt(st.papers_queued) }) : t("topic_none")) + "</div>") + "</div>" +
+      '<div class="meta">' + (st ? esc(fmt("topic_gaps", { n: nfmt(st.gaps_identified) })) : "") + "</div></div>";
   }).join("");
 }
 
@@ -1302,15 +3149,15 @@ function eventRow(e) {
     // Open the detail modal over the current page rather than routing to
     // #/papers/<id>: jumping to another page to read one abstract loses the
     // reader's place in the feed.
-    main = '<a href="#" data-paper="' + esc(e.it.id) + '">' + esc(e.it.title) + "</a>";
+    main = '<a href="#" data-paper="' + esc(e.it.id) + '">' + mdInline(e.it.title) + "</a>";
     trail = e.it.source || "";
   } else if (e.key === "gaps") {
-    main = esc(e.it.description);
-    trail = e.it.topic_id ? "topic " + esc(e.it.topic_id.slice(0, 8)) : "";
+    main = mdInline(e.it.description);
+    trail = e.it.topic_id ? esc(fmt("ev_topic", { id: e.it.topic_id.slice(0, 8) })) : "";
   } else {
     // Same reasoning as papers: open the report over the feed rather than
     // navigating to Results and making the reader find it again.
-    main = '<a href="#" data-report="' + esc(e.it.id) + '">' + esc(e.it.title) + "</a>";
+    main = '<a href="#" data-report="' + esc(e.it.id) + '">' + mdInline(e.it.title) + "</a>";
   }
   return '<div class="ev"><span class="tick">' + clock(e.date) + '</span>' +
     '<span class="mark" style="background:' + c + '"></span><span>' + main + "</span>" +
@@ -1323,41 +3170,41 @@ function nothing(msg) {
 
 function onboarding(cf) {
   return `
-    <div class="page-head"><h1>Welcome</h1><span class="page-sub">your workspace is empty — three commands to a first survey</span></div>
+    <div class="page-head"><h1>${esc(t("onb_h"))}</h1><span class="page-sub">${esc(t("onb_sub"))}</span></div>
     <div class="empty-block">
-      <h3>Start your library</h3>
-      <p>research-agent indexes papers, tracks what you've read, and finds what you've missed.</p>
+      <h3>${esc(t("onb_h2"))}</h3>
+      <p>${esc(t("onb_p"))}</p>
       <div class="steps">
-        <div class="step"><span class="no">01</span><div><div>Add a topic you care about</div>
+        <div class="step"><span class="no">01</span><div><div>${esc(t("onb_s1"))}</div>
           <div class="cmd"><b>research topics add "your topic"</b></div></div></div>
-        <div class="step"><span class="no">02</span><div><div>Pull papers in from arXiv or Semantic Scholar</div>
+        <div class="step"><span class="no">02</span><div><div>${esc(t("onb_s2"))}</div>
           <div class="cmd"><b>research ingest "search words" --topic &lt;topic-id&gt;</b></div></div></div>
-        <div class="step"><span class="no">03</span><div><div>Find your gaps, then generate a report</div>
+        <div class="step"><span class="no">03</span><div><div>${esc(t("onb_s3"))}</div>
           <div class="cmd"><b>research gaps --topic &lt;topic-id&gt;</b> &nbsp;·&nbsp; <b>research report --topic &lt;topic-id&gt;</b></div></div></div>
       </div>
-      <p class="faint" style="margin:18px 0 0;font-size:12px">This dashboard refreshes as the CLI works${cf && cf.llm ? "" : " — and once an LLM is configured, gap analysis and reports come alive"}.</p>
+      <p class="faint" style="margin:18px 0 0;font-size:12px">${esc(t("onb_foot"))}${cf && cf.llm ? "." : esc(t("onb_foot_llm")) + "."}</p>
     </div>`;
 }
 
 /* ───────────────────────── papers page ───────────────────────── */
 function drawPapersPage() {
   $("main").innerHTML = `
-    <div class="page-head"><h1>Papers</h1><span class="page-sub" id="p-count"></span></div>
+    <div class="page-head"><h1>${esc(t("nav_papers"))}</h1><span class="page-sub" id="p-count"></span></div>
     <div class="toolbar">
-      <div class="search">${ICON.search}<input id="q" placeholder="Search title, author, tag" value="${esc(state.query)}"><kbd>/</kbd></div>
+      <div class="search">${ICON.search}<input id="q" placeholder="${esc(t("search_ph"))}" value="${esc(state.query)}"><kbd>/</kbd></div>
       <div class="chips" id="f-chips">
-        <button class="chip" data-f="all">All</button>
-        ${READS.map(s => '<button class="chip" data-f="' + s + '">' + esc(READ_LABEL[s]) + "</button>").join("")}
+        <button class="chip" data-f="all">${esc(t("all"))}</button>
+        ${READS.map(s => '<button class="chip" data-f="' + s + '">' + esc(RL[LANG][s]) + "</button>").join("")}
       </div>
-      <select id="ptopic" title="Scope to one topic">
-        <option value="all">All topics</option>
-        ${state.topics.map(t => '<option value="' + esc(t.id) + '"' + (state.paperTopic === t.id ? " selected" : "") + ">" + esc(t.name) + "</option>").join("")}
+      <select id="ptopic" title="${esc(t("scope_topic"))}">
+        <option value="all">${esc(t("all_topics"))}</option>
+        ${state.topics.map(tp => '<option value="' + esc(tp.id) + '"' + (state.paperTopic === tp.id ? " selected" : "") + ">" + esc(tp.name) + "</option>").join("")}
       </select>
       <select id="sort" style="margin-left:auto">
-        <option value="recent">Recently added</option>
-        <option value="relevance">Relevance</option>
-        <option value="rating">Rating</option>
-        <option value="title">Title</option>
+        <option value="recent">${esc(t("sort_recent"))}</option>
+        <option value="relevance">${esc(t("sort_relevance"))}</option>
+        <option value="rating">${esc(t("sort_rating"))}</option>
+        <option value="title">${esc(t("sort_title"))}</option>
       </select>
     </div>
     <div id="p-table"></div>`;
@@ -1398,14 +3245,14 @@ function drawPaperTable() {
     title: (a,b) => a.title.localeCompare(b.title),
   }[state.paperSort];
   list = list.slice().sort(by);
-  $("p-count").textContent = nfmt(list.length) + " of " + nfmt(state.papers.length) + " shown";
+  $("p-count").textContent = fmt("shown_count", { n: nfmt(list.length), m: nfmt(state.papers.length) });
 
   $("p-table").innerHTML = list.length ? `
     <table><thead><tr>
-      <th style="width:66px">Depth</th><th>Paper</th><th style="width:150px">Reading</th>
-      <th style="width:112px">Rating</th><th style="width:80px">Relevance</th></tr></thead>
+      <th style="width:66px">${esc(t("col_depth"))}</th><th>${esc(t("col_paper"))}</th><th style="width:150px">${esc(t("col_reading"))}</th>
+      <th style="width:112px">${esc(t("col_rating"))}</th><th style="width:80px">${esc(t("col_relevance"))}</th></tr></thead>
       <tbody>${list.map(p => paperRow(p)).join("")}</tbody></table>`
-    : '<div class="empty-block"><h3>Nothing matches</h3><p>Clear the search or pick another filter.</p></div>';
+    : '<div class="empty-block"><h3>' + esc(t("no_match_h")) + "</h3><p>" + esc(t("no_match_p")) + "</p></div>";
 
   $("p-table").querySelectorAll("tr.rowlink").forEach(tr =>
     tr.addEventListener("click", e => {
@@ -1418,15 +3265,15 @@ function drawPaperTable() {
 function paperRow(p) {
   const u = safeUrl(p.url);
   const snippet = p.abstract_text
-    ? '<div class="pt-abs">' + esc(p.abstract_text.slice(0, 160)) + (p.abstract_text.length > 160 ? "…" : "") + "</div>"
+    ? '<div class="pt-abs">' + mdInline(p.abstract_text.slice(0, 160)) + (p.abstract_text.length > 160 ? "…" : "") + "</div>"
     : "";
   const link = u
-    ? ' <a class="rowlink-ext" href="' + u + '" target="_blank" rel="noreferrer" title="Open paper" aria-label="Open paper">' + ICON.ext + "</a>"
+    ? ' <a class="rowlink-ext" href="' + u + '" target="_blank" rel="noreferrer" title="' + esc(t("open_paper")) + '" aria-label="' + esc(t("open_paper")) + '">' + ICON.ext + "</a>"
     : "";
   return '<tr class="rowlink" data-id="' + esc(p.id) + '">' +
     "<td>" + dmark(p.status) + "</td>" +
-    '<td><div class="pt">' + esc(p.title) + link + "</div>" +
-      '<div class="pt-sub">' + esc(p.authors.slice(0, 2).join(", ")) + (p.authors.length > 2 ? " et al." : "") +
+    '<td><div class="pt">' + mdInline(p.title) + link + "</div>" +
+      '<div class="pt-sub">' + esc(p.authors.slice(0, 2).join(", ")) + (p.authors.length > 2 ? " " + esc(t("et_al")) : "") +
       (p.year ? ", " + p.year : "") + "</div>" + snippet + "</td>" +
     "<td>" + statusSelect(p) + "</td>" +
     "<td>" + stars(p) + "</td>" +
@@ -1443,13 +3290,13 @@ function bindRowControls(root) {
       const ok = await patchPaper(id, { rating: next }, state.papers);
       if (ok) {
         el.querySelectorAll("button").forEach(x => x.classList.toggle("on", +x.dataset.star <= (next || 0)));
-        toast(next ? "Rated " + next + " of 5" : "Rating cleared");
+        toast(next ? fmt("rated", { n: next }) : t("rating_cleared"));
       }
     }));
   });
   root.querySelectorAll(".stepper").forEach(el => el.addEventListener("change", async () => {
     const ok = await patchPaper(el.dataset.id, { reading_status: el.value }, state.papers);
-    if (ok) toast("Moved to " + READ_LABEL[el.value].toLowerCase());
+    if (ok) toast(fmt("moved", { x: RL[LANG][el.value] }));
   }));
 }
 
@@ -1468,27 +3315,28 @@ async function openDrawer(id) {
   if (!p) return;
   const links = [];
   const u = safeUrl(p.url);
-  if (u) links.push('<a href="' + u + '" target="_blank" rel="noreferrer">Publisher ' + ICON.ext + "</a>");
+  if (u) links.push('<a href="' + u + '" target="_blank" rel="noreferrer">' + esc(t("publisher")) + " " + ICON.ext + "</a>");
   if (p.doi) links.push('<span class="mono">DOI ' + esc(p.doi) + "</span>");
   if (p.arxiv_id) links.push('<span class="mono">arXiv ' + esc(p.arxiv_id) + "</span>");
   if (p.pdf_path) links.push('<span class="mono">' + esc(p.pdf_path.split("/").pop()) + "</span>");
   $("drawer").innerHTML =
-    '<button class="close" id="drawer-x" aria-label="Close">' + ICON.x + "</button>" +
+    '<button class="close" id="drawer-x" aria-label="' + esc(t("close")) + '">' + ICON.x + "</button>" +
     '<div style="margin-bottom:10px">' + dmark(p.status) + "</div>" +
-    "<h2>" + esc(p.title) + "</h2>" +
+    "<h2>" + mdInline(p.title) + "</h2>" +
     '<div class="dim" style="font-size:13px">' + esc(p.authors.join(", ")) +
       (p.year ? " · " + p.year : "") + (p.venue ? " · " + esc(p.venue) : "") + "</div>" +
     (links.length ? '<div class="sec" style="margin-top:12px;padding-top:10px;display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px">' + links.join("") + "</div>" : "") +
-    (p.abstract_text ? '<div class="abstract">' + esc(p.abstract_text) + "</div>" : "") +
-    (p.pdf_path ? '<div class="sec"><button class="btn" id="drawer-read">Read paper</button></div>' : "") +
-    '<div class="sec"><div class="h">Reading progress</div>' +
+    (p.abstract_text ? '<div class="abstract' + mdCls() + '">' + mdBlock(p.abstract_text) + "</div>" : "") +
+    (p.pdf_path ? '<div class="sec"><button class="btn" id="drawer-read">' + esc(t("read_paper")) + "</button></div>" : "") +
+    '<div class="sec"><div class="h">' + esc(t("reading_progress")) + "</div>" +
       '<div style="display:flex;gap:18px;align-items:center">' + statusSelect(p) + stars(p) + "</div></div>" +
-    (p.tags.length ? '<div class="sec"><div class="h">Tags</div>' + p.tags.map(t => '<span class="tag">' + esc(t) + "</span>").join("") + "</div>" : "") +
-    (p.notes ? '<div class="sec"><div class="h">Notes</div><div class="abstract" style="margin:0">' + esc(p.notes) + "</div></div>" : "") +
+    (p.tags.length ? '<div class="sec"><div class="h">' + esc(t("tags")) + "</div>" + p.tags.map(tg => '<span class="tag">' + esc(tg) + "</span>").join("") + "</div>" : "") +
+    (p.notes ? '<div class="sec"><div class="h">' + esc(t("notes")) + '</div><div class="abstract' + mdCls() + '" style="margin:0">' + mdBlock(p.notes) + "</div></div>" : "") +
     '<div class="sec"><table class="kv">' +
-      "<tr><td>Added</td><td>" + esc(day(p.created_at)) + "</td></tr>" +
-      "<tr><td>Updated</td><td>" + esc(day(p.updated_at)) + "</td></tr>" +
+      "<tr><td>" + esc(t("added")) + "</td><td>" + esc(day(p.created_at)) + "</td></tr>" +
+      "<tr><td>" + esc(t("updated")) + "</td><td>" + esc(day(p.updated_at)) + "</td></tr>" +
       '<tr><td>ID</td><td class="mono">' + esc(p.id) + "</td></tr></table></div>";
+  enhance($("drawer"));
   $("drawer").classList.add("open");
   $("overlay").classList.add("open");
   // The node is reused between papers, so it retains the last scroll offset
@@ -1509,7 +3357,10 @@ function closeDrawer() {
     history.replaceState(null, "", "#/papers");
   }
 }
-$("overlay").addEventListener("click", closeDrawer);
+$("overlay").addEventListener("click", () => {
+  if ($("reader").classList.contains("open")) closeReader();
+  else closeDrawer();
+});
 
 /* ───────────────────────── report reader ───────────────────────── */
 /* Stored bodies carry `<!-- page N -->` ingest anchors; escape everything,
@@ -1519,31 +3370,45 @@ function bodyHtml(body) {
   return esc(body).replace(/&lt;!-- page (\d+) --&gt;/g,
     '<span class="page-anchor">p. $1</span>');
 }
+/* Markdown path: split on the page markers first (sanitizing would drop the
+   comments), render each chunk, join with the ruled anchors. */
+function paperBodyHtml(body) {
+  if (!mdActive()) return bodyHtml(body);
+  return body.split(/<!-- page (\d+) -->/).map((chunk, i) =>
+    i % 2 ? '<span class="page-anchor">p. ' + esc(chunk) + "</span>" : mdBlock(chunk)
+  ).join("");
+}
 
 async function openPaperReader(id) {
   const p = state.papers.find(x => x.id === id);
   if (!p) return;
   const head =
-    '<button class="exit" id="reader-x">Close</button><div class="inner">' +
-    "<h1>" + esc(p.title) + "</h1>" +
+    '<button class="close" id="reader-x" aria-label="' + esc(t("close")) + '">' + ICON.x + "</button>" +
+    '<div class="inner">' +
+    "<h2>" + esc(p.title) + "</h2>" +
     '<div class="meta">' + esc(p.authors.slice(0, 3).join(", ")) + (p.year ? " · " + p.year : "") + "</div>";
+  // Same card, same dimmed backdrop as the paper detail modal — replace it
+  // rather than stack on top of it.
+  $("drawer").classList.remove("open");
   $("reader").classList.add("open");
-  $("reader-x").addEventListener("click", () => $("reader").classList.remove("open"));
+  $("overlay").classList.add("open");
   $("reader").scrollTop = 0;
   if (p.pdf_path) {
     // Native browser PDF viewer — same-origin, so the iframe is allowed.
     $("reader").innerHTML = head +
       '<iframe class="pdf" src="/api/papers/' + encodeURIComponent(id) + '/pdf"></iframe></div>';
-    return;
+  } else {
+    $("reader").innerHTML = head +
+      '<div class="body' + mdCls() + '" id="paper-body"><span class="dim">' + esc(t("reader_loading")) + "</span></div></div>";
+    try {
+      const data = await api("/api/papers/" + encodeURIComponent(id) + "/body");
+      $("paper-body").innerHTML = paperBodyHtml(data.body);
+    } catch (e) {
+      $("paper-body").innerHTML = '<span class="dim">' + esc(e.message) + "</span>";
+    }
   }
-  $("reader").innerHTML = head +
-    '<div class="body" id="paper-body"><span class="dim">Loading…</span></div></div>';
-  try {
-    const data = await api("/api/papers/" + encodeURIComponent(id) + "/body");
-    $("paper-body").innerHTML = bodyHtml(data.body);
-  } catch (e) {
-    $("paper-body").innerHTML = '<span class="dim">' + esc(e.message) + "</span>";
-  }
+  enhance($("reader"));
+  $("reader-x").addEventListener("click", closeReader);
 }
 /// Open a report by id. History events carry only id/title/date, so the full
 /// record (with its sections) has to come from /api/results.
@@ -1560,23 +3425,32 @@ async function openReportById(id) {
 
 function openReader(rep) {
   $("reader").innerHTML =
-    '<button class="exit" id="reader-x">Close</button><div class="inner">' +
-    "<h1>" + esc(rep.title) + "</h1>" +
-    '<div class="meta">' + esc(day(rep.generated_at)) + " · " + rep.sections.length + " sections" +
+    '<button class="close" id="reader-x" aria-label="' + esc(t("close")) + '">' + ICON.x + "</button>" +
+    '<div class="inner">' +
+    "<h2>" + esc(rep.title) + "</h2>" +
+    '<div class="meta">' + esc(day(rep.generated_at)) + " · " + esc(fmt("report_sections", { n: rep.sections.length })) +
       (rep.output_path ? " · " + esc(rep.output_path) : "") + "</div>" +
     (rep.sections.length
-      ? rep.sections.map(s => "<h3>" + esc(s.heading) + '</h3><div class="body">' + esc(s.content) + "</div>").join("")
-      : '<div class="body dim">This report has no sections stored.</div>') +
+      ? rep.sections.map(s => "<h3>" + esc(s.heading) + '</h3><div class="body' + mdCls() + '">' + mdBlock(s.content) + "</div>").join("")
+      : '<div class="body dim">' + esc(t("report_no_sections")) + "</div>") +
     "</div>";
+  $("drawer").classList.remove("open");
   $("reader").classList.add("open");
-  $("reader-x").addEventListener("click", () => $("reader").classList.remove("open"));
+  $("overlay").classList.add("open");
   $("reader").scrollTop = 0;
+  enhance($("reader"));
+  $("reader-x").addEventListener("click", closeReader);
+}
+
+function closeReader() {
+  $("reader").classList.remove("open");
+  $("overlay").classList.remove("open");
 }
 
 /* ───────────────────────── keyboard ───────────────────────── */
 document.addEventListener("keydown", e => {
   if (e.key === "Escape") {
-    if ($("reader").classList.contains("open")) { $("reader").classList.remove("open"); return; }
+    if ($("reader").classList.contains("open")) { closeReader(); return; }
     if ($("drawer").classList.contains("open")) { closeDrawer(); return; }
   }
   if (e.key === "/" && !e.target.closest("input, select, textarea")) {
@@ -1588,20 +3462,46 @@ document.addEventListener("keydown", e => {
 async function render() {
   const { page, arg } = route();
   closeDrawerSilent();
+  closeReader();
   try {
     await pages[page](arg);
   } catch (e) {
     $("main").innerHTML = '<div class="alert">' + ICON.warn +
-      "<div><b>Could not reach the dashboard API.</b> " + esc(e.message) + "</div></div>";
+      "<div><b>" + esc(t("err_api")) + "</b> " + esc(e.message) + "</div></div>";
   }
 }
 function closeDrawerSilent() {
   $("drawer").classList.remove("open");
   $("overlay").classList.remove("open");
 }
-/* ── chrome wiring: toggles + mobile nav ── */
+/* ── chrome wiring: actions cluster + toggles + mobile nav ── */
+/* One set of action buttons (language, theme, GitHub). Desktop parks them in
+   the sidebar just above the status block; on mobile they return to the
+   topbar. Moving the same nodes keeps their listeners intact. */
+$("slot-topbar").innerHTML = `
+  <div class="actions" id="actions-cluster">
+    <div class="lang" id="lang-wrap">
+      <button class="iconbtn wide" id="lang-btn" aria-haspopup="listbox" aria-expanded="false" title="Language">
+        <span id="lang-cur"></span>
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" style="width:9px;height:9px"><path d="m3.5 6 4.5 4.5L12.5 6"/></svg>
+      </button>
+      <div class="lang-menu" id="lang-menu" role="listbox" aria-label="Language"></div>
+    </div>
+    <button class="iconbtn" id="theme-toggle" aria-label="Theme"></button>
+    <a class="iconbtn" href="https://github.com/epicsagas/research-agent" target="_blank" rel="noopener" aria-label="GitHub">
+      <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+    </a>
+  </div>`;
+const placeActions = mq => {
+  (mq.matches ? $("slot-side") : $("slot-topbar")).appendChild($("actions-cluster"));
+};
+const desktopMQ = window.matchMedia("(min-width: 901px)");
+placeActions(desktopMQ);
+desktopMQ.addEventListener?.("change", placeActions);
+
 applyTheme();
 applyLang();
+buildLangMenu();
 
 $("theme-toggle").addEventListener("click", () => {
   THEME = THEME === "light" ? "dark" : "light";
@@ -1610,11 +3510,35 @@ $("theme-toggle").addEventListener("click", () => {
   render();  // charts read their colours from CSS vars at draw time
 });
 
-$("lang-toggle").addEventListener("click", () => {
-  LANG = LANG === "ko" ? "en" : "ko";
+/* ── language dropdown ── */
+function buildLangMenu() {
+  $("lang-menu").innerHTML = LANGS.map(([code, name]) =>
+    '<button role="option" data-lang="' + code + '" aria-selected="' + (code === LANG) + '">' +
+    esc(name) + '<span class="lg-code">' + code + "</span></button>"
+  ).join("");
+  $("lang-menu").querySelectorAll("button").forEach(b =>
+    b.addEventListener("click", () => {
+      setLang(b.dataset.lang);
+      toggleLangMenu(false);
+    }));
+}
+function toggleLangMenu(open) {
+  const menu = $("lang-menu"), btn = $("lang-btn");
+  const show = open ?? !menu.classList.contains("open");
+  menu.classList.toggle("open", show);
+  btn.setAttribute("aria-expanded", String(show));
+}
+function setLang(code) {
+  if (!LANGS.some(([c]) => c === code) || code === LANG) return;
+  LANG = code;
   localStorage.setItem("ra-lang", LANG);
   applyLang();
-  render();
+  buildLangMenu();
+  render();  // all copy is rendered per-language at draw time
+}
+$("lang-btn").addEventListener("click", e => { e.stopPropagation(); toggleLangMenu(); });
+document.addEventListener("click", e => {
+  if (!e.target.closest("#lang-wrap")) toggleLangMenu(false);
 });
 
 /* Follow the system only while the user has not chosen for themselves. */
@@ -1636,6 +3560,11 @@ $("nav").addEventListener("click", e => { if (e.target.closest("a")) setNav(fals
 
 render();
 loadChrome();
+/* Deferred CDN libs land after first paint — redraw once they're in so
+   markdown/math/mermaid apply, unless a modal is already open. */
+window.addEventListener("load", () => {
+  if (!$("drawer").classList.contains("open") && !$("reader").classList.contains("open")) render();
+});
 </script>
 </body>
 </html>
