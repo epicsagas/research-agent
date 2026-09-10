@@ -313,6 +313,51 @@ fn check_env(name: &str) {
     }
 }
 
+/// Curated local embedding models for academic-paper hybrid search, best
+/// value first. Everything image-only (CLIP), code-specific, or dominated by
+/// a sibling in this list stays out; the full catalog remains one keystroke
+/// away via "Show all models…".
+const CURATED: &[(EmbeddingModel, &str)] = &[
+    (EmbeddingModel::BGESmallENV15, "best value"),
+    (EmbeddingModel::BGESmallENV15Q, "low-mem"),
+    (EmbeddingModel::AllMiniLML6V2Q, "low-mem"),
+    (EmbeddingModel::SnowflakeArcticEmbedSQ, "low-mem"),
+    (EmbeddingModel::SnowflakeArcticEmbedS, "balanced"),
+    (EmbeddingModel::EmbeddingGemma300M, "multilingual"),
+    (EmbeddingModel::MultilingualE5Small, "multilingual"),
+    (EmbeddingModel::BGESmallZHV15, "multilingual (zh)"),
+    (EmbeddingModel::GTEBaseENV15Q, "balanced"),
+    (EmbeddingModel::SnowflakeArcticEmbedMLong, "long context"),
+    (EmbeddingModel::BGEM3, "multilingual + long"),
+    (EmbeddingModel::BGELargeENV15, "max quality"),
+];
+
+/// Rough runtime peak for an ONNX embedding model: resident weights plus
+/// activation headroom, with a floor for the ONNX session itself.
+fn ram_need_mb(model: EmbeddingModel) -> usize {
+    model.size_mb() * 2 + 256
+}
+
+/// Models the short list this machine can run without swapping: half of
+/// total RAM keeps the OS, the DB, and the embedding arena apart. `None`
+/// budget (probe failed) means no filtering. A tiny machine that fits
+/// nothing still gets the smallest quantized model so the menu is never
+/// empty.
+/// ponytail: RAM as the only hardware signal — VRAM probing is not portable;
+/// revisit if DirectML VRAM matters someday.
+fn curated_within_budget(budget_mb: Option<usize>) -> Vec<EmbeddingModel> {
+    let in_budget = |m: &EmbeddingModel| budget_mb.is_none_or(|b| ram_need_mb(*m) <= b);
+    let mut fits: Vec<EmbeddingModel> = CURATED
+        .iter()
+        .filter(|(m, _)| in_budget(m))
+        .map(|(m, _)| *m)
+        .collect();
+    if fits.is_empty() {
+        fits.push(EmbeddingModel::BGESmallENV15Q);
+    }
+    fits
+}
+
 fn prompt_local_embed(
     theme: &ColorfulTheme,
     existing: Option<&SearchConfig>,
@@ -321,39 +366,65 @@ fn prompt_local_embed(
         .filter(|s| s.provider != "openai")
         .map(|s| s.model.clone())
         .unwrap_or_else(|| "BGESmallENV15".to_string());
-    let default_idx = EmbeddingModel::ALL
+    let cached = |m: EmbeddingModel| {
+        llm_kernel::embedding::lazy::is_model_cached(
+            m,
+            &crate::config::research_dir().join("models"),
+        )
+    };
+
+    // Short list sized to this machine, with the full catalog as the last
+    // entry for anyone who wants the rest of the zoo.
+    let budget = crate::config::total_ram_mb().map(|mb| (mb / 2) as usize);
+    let shortlist = curated_within_budget(budget);
+    let mut items: Vec<String> = shortlist
+        .iter()
+        .map(|m| {
+            let tag = CURATED
+                .iter()
+                .find(|(cm, _)| cm == m)
+                .map(|(_, t)| *t)
+                .unwrap_or("");
+            let mut s = format!(
+                "{model} — {dim}-dim, ~{mb} MB [{tag}]",
+                model = m.as_str(),
+                dim = m.dimension(),
+                mb = m.size_mb(),
+                tag = tag
+            );
+            if cached(*m) {
+                s.push_str(" (downloaded)");
+            }
+            if m.as_str() == default_model {
+                s.push_str("  <- current");
+            }
+            s
+        })
+        .collect();
+    items.push(format!("Show all {} models…", EmbeddingModel::ALL.len()));
+    let refs: Vec<&str> = items.iter().map(|s| s.as_str()).collect();
+    let default_idx = shortlist
         .iter()
         .position(|m| m.as_str() == default_model)
         .unwrap_or(0);
-    let labels: Vec<String> = EmbeddingModel::ALL
-        .iter()
-        .map(|m| {
-            format!(
-                "{} — {}-dim, ~{} MB: {}",
-                m.as_str(),
-                m.dimension(),
-                m.size_mb(),
-                m.description()
-            )
-        })
-        .collect();
-    let refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
     let pick = Select::with_theme(theme)
         .with_prompt("Local embedding model")
         .default(default_idx)
         .items(&refs)
         .interact()
         .map_err(canceled)?;
-    let model = EmbeddingModel::ALL[pick];
+    let model = if pick < shortlist.len() {
+        shortlist[pick]
+    } else {
+        prompt_all_models(theme, &default_model)?
+    };
+
     let search = SearchConfig {
         provider: "local".into(),
         model: model.as_str().to_string(),
         ..SearchConfig::default()
     };
-    if llm_kernel::embedding::lazy::is_model_cached(
-        model,
-        &crate::config::research_dir().join("models"),
-    ) {
+    if cached(model) {
         println!("  ✓ {} is already downloaded", model.as_str());
         return Ok(search);
     }
@@ -371,6 +442,35 @@ fn prompt_local_embed(
         download_and_check(model)?;
     }
     Ok(search)
+}
+
+/// The full 44-model catalog, for users who want something the curated list
+/// leaves out.
+fn prompt_all_models(theme: &ColorfulTheme, default_model: &str) -> Result<EmbeddingModel> {
+    let labels: Vec<String> = EmbeddingModel::ALL
+        .iter()
+        .map(|m| {
+            format!(
+                "{} — {}-dim, ~{} MB: {}",
+                m.as_str(),
+                m.dimension(),
+                m.size_mb(),
+                m.description()
+            )
+        })
+        .collect();
+    let refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
+    let default_idx = EmbeddingModel::ALL
+        .iter()
+        .position(|m| m.as_str() == default_model)
+        .unwrap_or(0);
+    let pick = Select::with_theme(theme)
+        .with_prompt("All embedding models")
+        .default(default_idx)
+        .items(&refs)
+        .interact()
+        .map_err(canceled)?;
+    Ok(EmbeddingModel::ALL[pick])
 }
 
 fn prompt_openai_embed(
@@ -418,4 +518,44 @@ fn expand_home(path: &str) -> String {
 /// Map dialoguer's interrupt to a clean message instead of an io error dump.
 fn canceled(e: dialoguer::Error) -> anyhow::Error {
     anyhow::anyhow!("Onboarding canceled: {e}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn curated_list_is_sane() {
+        let models: Vec<EmbeddingModel> = CURATED.iter().map(|(m, _)| *m).collect();
+        assert!(models.contains(&EmbeddingModel::BGESmallENV15));
+        // No image models, no duplicates, and every entry round-trips through
+        // the config string (it must parse back at runtime).
+        assert!(models.iter().all(|m| !m.is_image_model()));
+        let mut unique = models.clone();
+        unique.sort_by_key(|m| m.as_str());
+        unique.dedup();
+        assert_eq!(unique.len(), models.len());
+        assert!(models
+            .iter()
+            .all(|m| EmbeddingModel::parse(m.as_str()) == Ok(*m)));
+    }
+
+    #[test]
+    fn low_budget_keeps_tiny_drops_large() {
+        let fits = curated_within_budget(Some(1024));
+        assert!(fits.contains(&EmbeddingModel::BGESmallENV15Q));
+        assert!(!fits.contains(&EmbeddingModel::BGELargeENV15));
+    }
+
+    #[test]
+    fn tiny_budget_falls_back_to_quantized_small() {
+        let fits = curated_within_budget(Some(256));
+        assert_eq!(fits, vec![EmbeddingModel::BGESmallENV15Q]);
+    }
+
+    #[test]
+    fn big_or_unknown_budget_shows_everything() {
+        assert_eq!(curated_within_budget(Some(8192)).len(), CURATED.len());
+        assert_eq!(curated_within_budget(None).len(), CURATED.len());
+    }
 }

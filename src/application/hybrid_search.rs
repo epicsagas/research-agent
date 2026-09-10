@@ -353,7 +353,16 @@ fn make_backend(cfg: &SearchConfig) -> Option<Box<dyn EmbeddingProvider>> {
         ));
     }
 
-    let model: EmbeddingModel = cfg.model.parse().ok()?;
+    let model: EmbeddingModel = match cfg.model.parse() {
+        Ok(m) => m,
+        Err(reason) => {
+            eprintln!(
+                "Warning: [search] model '{}' unusable ({reason}) — falling back to lexical search",
+                cfg.model
+            );
+            return None;
+        }
+    };
     // Model weights live under ~/.research/models (fastembed's CWD default
     // would scatter a .fastembed_cache into whatever directory you run from).
     let cache_dir = Some(crate::config::research_dir().join("models"));

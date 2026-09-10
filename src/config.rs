@@ -70,7 +70,7 @@ impl SearchConfig {
     }
 }
 
-fn total_ram_mb() -> Option<u64> {
+pub(crate) fn total_ram_mb() -> Option<u64> {
     #[cfg(target_os = "macos")]
     {
         let out = std::process::Command::new("sysctl")
