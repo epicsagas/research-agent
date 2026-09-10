@@ -29,10 +29,14 @@ const DEFAULT_BASE_URL: &str = "http://localhost:23119/api/";
 pub struct ZoteroWrite {
     base_url: String,
     client: reqwest::Client,
-    /// Sent as `Zotero-Server-ID` when set (`ZOTERO_SERVER_ID` env). The
-    /// local write path wants the instance's server ID; empty means the
-    /// header is omitted and Zotero decides whether to accept the write.
-    server_id: Option<String>,
+    /// The instance's `Zotero-Server-ID`, discovered from any response
+    /// header and echoed back on writes (Zotero 412s/428s otherwise).
+    /// `ZOTERO_SERVER_ID` overrides discovery; tests set it directly.
+    server_id: std::sync::Mutex<Option<String>>,
+    /// The local write key from `/api/local/authorize`: `Some((key,
+    /// remember))`. Single-use keys are cleared after each successful write;
+    /// remembered ones survive.
+    write_key: std::sync::Mutex<Option<(String, bool)>>,
 }
 
 impl ZoteroWrite {
@@ -50,6 +54,9 @@ impl ZoteroWrite {
             .nth(1)
             .unwrap_or("")
             .split('/')
+            .next()
+            .unwrap_or("")
+            .split(':')
             .next()
             .unwrap_or("");
         if !host.is_empty()
@@ -73,7 +80,113 @@ impl ZoteroWrite {
         Self {
             base_url,
             client: reqwest::Client::new(),
-            server_id,
+            server_id: std::sync::Mutex::new(server_id),
+            write_key: std::sync::Mutex::new(None),
+        }
+    }
+
+    /// The instance ID, discovering it once from a bare `GET /api/` if not
+    /// already known (env override or a previous response header).
+    async fn ensure_server_id(&self) -> Result<Option<String>> {
+        {
+            let cached = self.server_id.lock().unwrap();
+            if cached.is_some() {
+                return Ok(cached.clone());
+            }
+        }
+        let resp = self
+            .client
+            .get(self.base_url.clone())
+            .send()
+            .await
+            .map_err(|e| {
+                if e.is_connect() {
+                    ResearchError::Source(format!(
+                        "could not reach Zotero at {} (is Zotero running?): {e}",
+                        self.base_url
+                    ))
+                } else {
+                    ResearchError::Source(format!("Zotero request failed: {e}"))
+                }
+            })?;
+        let discovered = resp
+            .headers()
+            .get("Zotero-Server-ID")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+        let mut cached = self.server_id.lock().unwrap();
+        if cached.is_none() {
+            *cached = discovered.clone();
+        }
+        Ok(cached.clone())
+    }
+
+    /// A local write key, authorizing once if not already held. Zotero pops
+    /// its confirmation dialog naming "research-agent"; "Always Allow" makes
+    /// the key reusable, otherwise it is consumed by the first write.
+    async fn ensure_write_key(&self) -> Result<String> {
+        {
+            let cached = self.write_key.lock().unwrap();
+            if let Some((key, _)) = cached.as_ref() {
+                return Ok(key.clone());
+            }
+        }
+        let server_id = self.ensure_server_id().await?;
+        #[cfg(feature = "mcp")]
+        eprintln!("debug: server_id = {server_id:?}");
+        #[cfg(not(feature = "mcp"))]
+        eprintln!("debug: server_id = {server_id:?}");
+        let mut req = self
+            .client
+            .post(format!("{}local/authorize", self.base_url))
+            .json(&json!({ "appName": "research-agent" }));
+        if let Some(id) = &server_id {
+            req = req.header("Zotero-Server-ID", id);
+        }
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| ResearchError::Source(format!("Zotero authorization failed: {e}")))?;
+        let status = resp.status();
+        if status == reqwest::StatusCode::FORBIDDEN {
+            return Err(ResearchError::Source(
+                "Zotero write authorization was denied — approve the dialog (or pick \
+                 \"Always Allow\" to skip it for future runs)"
+                    .to_string(),
+            ));
+        }
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            return Err(ResearchError::Source(
+                "Zotero limits authorization prompts to five per minute — retry in a \
+                 moment, or pick \"Always Allow\" to stop the prompts"
+                    .to_string(),
+            ));
+        }
+        if !status.is_success() {
+            return Err(status_error(status));
+        }
+        let body = resp
+            .text()
+            .await
+            .map_err(|e| ResearchError::Source(format!("Zotero response read failed: {e}")))?;
+        #[derive(serde::Deserialize)]
+        struct Auth {
+            key: String,
+            #[serde(default)]
+            remember: bool,
+        }
+        let auth: Auth = serde_json::from_str(&body)
+            .map_err(|e| ResearchError::Source(format!("Zotero authorization parse failed: {e}")))?;
+        let mut cached = self.write_key.lock().unwrap();
+        *cached = Some((auth.key.clone(), auth.remember));
+        Ok(auth.key)
+    }
+
+    /// Forget the write key: called after a successful write when the user
+    /// did not pick "Always Allow" (the key was single-use).
+    fn clear_write_key_if_single_use(&self, remember: bool) {
+        if !remember {
+            *self.write_key.lock().unwrap() = None;
         }
     }
 
@@ -85,15 +198,22 @@ impl ZoteroWrite {
             .patch(format!("{}users/0/items/{key}", self.base_url))
             .header("If-Unmodified-Since-Version", version.to_string())
             .json(&tags_payload(tags));
-        if let Some(id) = &self.server_id {
+        if let Some(id) = self.ensure_server_id().await? {
             req = req.header("Zotero-Server-ID", id);
         }
+        let api_key = self.ensure_write_key().await?;
+        req = req.header("Zotero-API-Key", api_key);
         let resp = req
             .send()
             .await
             .map_err(|e| ResearchError::Source(format!("Zotero write failed: {e}")))?;
         let status = resp.status();
         if status.is_success() {
+            let remember = match self.write_key.lock().unwrap().as_ref() {
+                Some((_, remember)) => *remember,
+                None => false,
+            };
+            self.clear_write_key_if_single_use(remember);
             return Ok(true);
         }
         if status == reqwest::StatusCode::PRECONDITION_FAILED
