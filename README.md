@@ -205,7 +205,14 @@ research --version
 | `research read <id> [--status <status>] [--rating <1-5>]` | Update reading status or rating |
 | `research read <id> --body` | Print a paper's stored body text |
 | `research status` | Show research state overview |
+| `research export --to zotero [--apply]` | Push paper tags into a running Zotero, matched by normalized DOI. Dry-run by default (prints what would change, writes nothing); `--apply` writes. Items changed in Zotero are skipped, never merged. CLI-only by design — no MCP tool |
 | `research mcp` | Start the stdio MCP server (alias: `serve`) |
+
+Verifying the Zotero push needs a running Zotero (10+ for writes): run
+`cargo test zotero_write -- --ignored` for the live read, then do one
+`research export --to zotero --apply` against a test item and confirm the tag
+appears in Zotero. Writes pop a per-item confirmation dialog unless you pick
+"Always Allow" (confirmations are capped at five per minute).
 
 Every subcommand also accepts a global `--db <path>` flag to use a specific
 database instead of `~/.research/research.db` — useful for isolated or test

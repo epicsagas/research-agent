@@ -68,6 +68,11 @@ llm-kernel = { version = "0.31", features = ["embedding-fastembed-directml"] }
 
 [dev-dependencies]
 tempfile = "3"
+criterion = "0.7"
+
+[[bench]]
+name = "core"
+harness = false
 
 [profile.dev]
 opt-level = 0

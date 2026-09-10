@@ -81,6 +81,31 @@ impl HybridSearch {
         Some(search)
     }
 
+    /// Bench/test construction with an explicit embedding provider: no ONNX,
+    /// no config file, fresh index. Callers bring a deterministic provider so
+    /// numbers measure the search stack, not the hardware.
+    #[doc(hidden)]
+    pub fn with_parts(backend: Box<dyn EmbeddingProvider>, index_path: PathBuf) -> Self {
+        let model_id = backend.name().to_string();
+        let index = TurbovecIndex::with_meta(
+            backend.dim(),
+            BIT_WIDTH,
+            Some(model_id),
+            Some("doc_prefix".into()),
+            Some(1),
+        )
+        .expect("fresh index");
+        let batch = crate::config::SearchConfig::default()
+            .embed_batch_size
+            .clamp(MIN_BATCH, MAX_BATCH);
+        Self {
+            backend,
+            index,
+            index_path,
+            batch,
+        }
+    }
+
     /// Re-embed the whole corpus and persist a fresh index. Texts are
     /// truncated and embedded in batches to bound inference memory
     /// (MAX_DOC_CHARS, `batch`).
