@@ -205,6 +205,7 @@ research --version
 | `research read <id> [--status <status>] [--rating <1-5>]` | Update reading status or rating |
 | `research read <id> --body` | Print a paper's stored body text |
 | `research status` | Show research state overview |
+| `research export --to zotero [--apply]` | Push paper tags into a running Zotero, matched by normalized DOI. Dry-run by default (prints what would change, writes nothing); `--apply` writes. Items changed in Zotero are skipped, never merged. CLI-only by design — no MCP tool |
 | `research mcp` | Start the stdio MCP server (alias: `serve`) |
 
 Every subcommand also accepts a global `--db <path>` flag to use a specific
