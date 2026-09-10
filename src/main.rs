@@ -133,6 +133,14 @@ enum Commands {
     /// Show research state overview
     Status,
 
+    /// Push paper tags into a running Zotero (dry-run by default; matched by
+    /// DOI). CLI-only by design — never exposed as an MCP tool.
+    Export {
+        /// Actually write; without this, only a report is printed
+        #[arg(long)]
+        apply: bool,
+    },
+
     /// Update reading status or rating of a paper
     Read {
         /// Paper ID
@@ -228,6 +236,7 @@ async fn run() -> Result<()> {
         Commands::Report { title, topic } => cmd_report(db, title, topic).await?,
         Commands::Topics { action } => cmd_topics(db, action)?,
         Commands::Status => cmd_status(db)?,
+        Commands::Export { apply } => cmd_export(db, apply).await?,
         Commands::Read {
             id,
             status,
@@ -795,6 +804,21 @@ fn cmd_status(db: PathBuf) -> Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+async fn cmd_export(db: PathBuf, apply: bool) -> Result<()> {
+    let store = open_store(&db)?;
+    let sink = research_agent::adapters::zotero_write::ZoteroWrite::new();
+    let report =
+        research_agent::application::zotero_export::export_tags_to_zotero(&store, &sink, apply)
+            .await?;
+    if apply {
+        println!("Zotero tags pushed.");
+    } else {
+        println!("Dry run (pass --apply to write).");
+    }
+    println!("{}", report.summary());
     Ok(())
 }
 

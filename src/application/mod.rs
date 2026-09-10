@@ -5,3 +5,4 @@ pub mod ingest_pipeline;
 pub mod paper_import;
 pub mod references;
 pub mod report_generator;
+pub mod zotero_export;

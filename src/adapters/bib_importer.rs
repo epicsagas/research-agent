@@ -243,6 +243,19 @@ pub(crate) struct ZoteroItem {
     tags: Vec<ZoteroTag>,
 }
 
+impl ZoteroItem {
+    /// Normalized DOI, if present. Shared by the read mapping and the write
+    /// path's matching so both see the same identifier.
+    pub(crate) fn normalized_doi(&self) -> Option<String> {
+        self.doi.as_deref().and_then(normalize_doi)
+    }
+
+    /// The item's tags as plain strings, empty and untagged entries dropped.
+    pub(crate) fn tag_strings(&self) -> Vec<String> {
+        self.tags.iter().filter_map(|t| t.tag.clone()).collect()
+    }
+}
+
 #[derive(serde::Deserialize)]
 struct ZoteroCreator {
     #[serde(default, rename = "firstName")]

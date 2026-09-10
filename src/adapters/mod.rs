@@ -7,3 +7,4 @@ pub mod pdf_source;
 pub mod semantic_scholar_source;
 pub mod sqlite_store;
 pub mod zotero_source;
+pub mod zotero_write;
