@@ -6,6 +6,7 @@ use llm_kernel::safety::sanitize_output;
 use llm_kernel::tokens::estimate_tokens;
 
 use crate::domain::knowledge_gap::{GapType, KnowledgeGap};
+use crate::domain::paper::Paper;
 use crate::domain::research_report::{ReportSection, ResearchReport};
 use crate::error::{ResearchError, Result};
 use crate::ports::index_store::IndexStore;
@@ -98,6 +99,9 @@ impl LlmResearchEngine {
 /// Token budget for report context: include as many linked papers (highest
 /// relevance first) as fit instead of a fixed count.
 const REPORT_CONTEXT_TOKENS: usize = 4000;
+/// Context budget for one enrichment batch. Smaller than the gap budget:
+/// keyword generation only needs the title and a slice of the abstract.
+const KEYWORD_CONTEXT_TOKENS: usize = 3000;
 
 /// Parse `GAP_TYPE|description` lines out of an LLM response. A non-empty
 /// response yielding zero parseable lines means the model ignored the format
@@ -128,6 +132,34 @@ fn parse_gaps(text: &str, topic_id: &str) -> Result<Vec<KnowledgeGap>> {
         )));
     }
     Ok(gaps)
+}
+
+/// Parse `paper_id|kw1; kw2; kw3` lines out of an enrichment response. Lines
+/// without a separator are skipped (models like to add a preamble), but a
+/// non-empty response yielding zero parseable lines is an error for the same
+/// reason as `parse_gaps`: silently returning nothing would look like "this
+/// paper has no keywords" instead of "the model ignored the format".
+fn parse_keywords(text: &str) -> Result<Vec<(String, String)>> {
+    let pairs: Vec<(String, String)> = text
+        .lines()
+        .filter_map(|line| {
+            let (id, kws) = line.split_once('|')?;
+            let id = id.trim();
+            let kws = kws.trim();
+            if id.is_empty() || kws.is_empty() {
+                return None;
+            }
+            Some((id.to_string(), kws.to_string()))
+        })
+        .collect();
+    if pairs.is_empty() && !text.trim().is_empty() {
+        return Err(ResearchError::Source(format!(
+            "keyword response matched no 'paper_id|keywords' lines; \
+             model ignored the format. Response start: {:?}",
+            text.chars().take(300).collect::<String>()
+        )));
+    }
+    Ok(pairs)
 }
 
 #[async_trait]
@@ -178,6 +210,58 @@ impl ResearchEngine for LlmResearchEngine {
         let text = sanitize_output(&response.content);
 
         parse_gaps(&text, topic_id)
+    }
+
+    async fn extract_keywords(&self, papers: &[Paper]) -> Result<Vec<(String, String)>> {
+        if papers.is_empty() {
+            return Ok(vec![]);
+        }
+        // No [llm] section: this is a normal state, not a failure. The caller
+        // (`research enrich`) prints the work queue instead so a host agent can
+        // do the generation and write results back.
+        let Some(config) = &self.config else {
+            return Ok(vec![]);
+        };
+
+        let mut context = String::new();
+        let mut used = 0usize;
+        for paper in papers {
+            let abstract_snippet: String = paper.abstract_text.chars().take(600).collect();
+            let block = format!("{}|{}\n{}\n\n", paper.id, paper.title, abstract_snippet);
+            let cost = estimate_tokens(&block);
+            if used + cost > KEYWORD_CONTEXT_TOKENS {
+                break;
+            }
+            used += cost;
+            context.push_str(&block);
+        }
+
+        let prompt = format!(
+            "For each paper below, output one line: paper_id|keyword; keyword; keyword\n\n\
+             Give 5-10 English search keywords per paper. Prefer synonyms, expanded \
+             acronyms, broader field terms, and alternative phrasings that a searcher \
+             might use but the abstract does not contain. Do not repeat words already \
+             present in the title or abstract — those are already indexed.\n\n\
+             Papers (format: id|title, then abstract):\n\n{context}"
+        );
+
+        let client = Self::make_client(config)?;
+        let response = client
+            .complete(LLMRequest {
+                system: Some(
+                    "You generate search keywords for academic papers. Output only \
+                     'paper_id|keywords' lines, nothing else."
+                        .into(),
+                ),
+                messages: vec![ChatMessage::user(prompt)],
+                temperature: 0.2,
+                max_tokens: Some(1024),
+                ..LLMRequest::default()
+            })
+            .await
+            .map_err(|e| ResearchError::Source(e.to_string()))?;
+
+        parse_keywords(&sanitize_output(&response.content))
     }
 
     async fn generate_report(&self, title: &str, topic_ids: &[String]) -> Result<ResearchReport> {
@@ -495,4 +579,36 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn parse_keywords_maps_ids_to_keyword_strings() {
+        let text = "abc-1|transformer; self-attention\nxyz-2|graph neural network; message passing";
+        let got = parse_keywords(text).unwrap();
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].0, "abc-1");
+        assert_eq!(got[0].1, "transformer; self-attention");
+        assert_eq!(got[1].0, "xyz-2");
+    }
+
+    #[test]
+    fn parse_keywords_rejects_unparseable_nonempty_response() {
+        // A model that ignores the format must surface as an error, not as
+        // "no keywords" — same rule as parse_gaps.
+        let err = parse_keywords("Sure! Here are some keywords for your papers.");
+        assert!(err.is_err(), "expected format violation to error");
+    }
+
+    #[test]
+    fn parse_keywords_accepts_empty_response() {
+        assert!(parse_keywords("   ").unwrap().is_empty());
+    }
+
+    #[test]
+    fn parse_keywords_skips_lines_without_separator() {
+        let text = "preamble line\nabc-1|alpha; beta\ntrailing note";
+        let got = parse_keywords(text).unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].0, "abc-1");
+    }
+
 }

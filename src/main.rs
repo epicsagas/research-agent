@@ -11,6 +11,7 @@ use research_agent::config::{Config, default_config_path};
 use research_agent::domain::paper::{Rating, ReadingStatus};
 use research_agent::domain::research_topic::ResearchTopic;
 use research_agent::ports::index_store::IndexStore;
+use research_agent::ports::research_engine::ResearchEngine;
 
 #[derive(Parser)]
 #[command(name = "research", version, about = "Personal research assistant")]
@@ -162,6 +163,28 @@ enum Commands {
         body: bool,
     },
 
+    /// Generate search keywords for papers (improves recall for queries whose
+    /// wording differs from the abstract). Uses the configured `[llm]`
+    /// provider; without one, prints the work queue for a host agent to fill
+    /// via `research enrich <ID> --keywords "..."`.
+    Enrich {
+        /// Write keywords for this single paper (requires --keywords)
+        id: Option<String>,
+        /// Keywords to store, e.g. "transformer; self-attention". Mechanical
+        /// write — no LLM call, so a host agent can supply them.
+        #[arg(long)]
+        keywords: Option<String>,
+        /// Only papers linked to this topic
+        #[arg(long)]
+        topic: Option<String>,
+        /// Include papers that already have keywords (re-generate them)
+        #[arg(long)]
+        force: bool,
+        /// Maximum papers to process
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+    },
+
     /// Start the local web dashboard (127.0.0.1, read-only)
     Dashboard {
         /// Port override (the config file's `[dashboard] port` otherwise)
@@ -253,6 +276,13 @@ async fn run() -> Result<()> {
             rating,
             body,
         } => cmd_read(db, id, status, rating, body)?,
+        Commands::Enrich {
+            id,
+            keywords,
+            topic,
+            force,
+            limit,
+        } => cmd_enrich(db, id, keywords, topic, force, limit).await?,
         Commands::Dashboard { port } => {
             let config_path = default_config_path();
             research_agent::dashboard::serve(cli.db.clone(), config_path, port).await?;
@@ -749,6 +779,90 @@ async fn cmd_reingest(db: PathBuf, missing_pages: bool) -> Result<()> {
     println!("Re-ingested {done} paper(s), skipped {skipped}, failed {failed}.");
     if done > 0 {
         println!("Run `research index --rebuild` to re-embed the updated bodies.");
+    }
+    Ok(())
+}
+
+async fn cmd_enrich(
+    db: PathBuf,
+    id: Option<String>,
+    keywords: Option<String>,
+    topic: Option<String>,
+    force: bool,
+    limit: usize,
+) -> Result<()> {
+    let store = open_store(&db)?;
+
+    // Mechanical single-paper write: the path a host agent uses when this
+    // install has no [llm] provider of its own.
+    if let Some(paper_id) = id {
+        let Some(kws) = keywords else {
+            anyhow::bail!("`research enrich <ID>` needs --keywords \"kw1; kw2\"");
+        };
+        store.set_paper_keywords(&paper_id, &kws)?;
+        println!("Keywords set for {paper_id}.");
+        return Ok(());
+    }
+    if keywords.is_some() {
+        anyhow::bail!("--keywords applies to a single paper: `research enrich <ID> --keywords ...`");
+    }
+
+    let candidates: Vec<_> = match (&topic, force) {
+        (Some(tid), false) => store
+            .list_papers_by_topic(tid, Some(limit * 4))?
+            .into_iter()
+            .filter(|p| p.keywords.is_empty())
+            .take(limit)
+            .collect(),
+        (Some(tid), true) => store
+            .list_papers_by_topic(tid, Some(limit))?
+            .into_iter()
+            .collect(),
+        (None, false) => store.papers_missing_keywords(limit)?,
+        (None, true) => store.list_papers(Some(limit))?,
+    };
+
+    if candidates.is_empty() {
+        println!("Nothing to enrich (every paper in scope already has keywords).");
+        return Ok(());
+    }
+
+    let inner_store = open_store(&db)?;
+    let engine = make_llm_engine(inner_store)?;
+    let pairs = engine.extract_keywords(&candidates).await?;
+
+    // No [llm] configured: print the queue so the calling agent can generate
+    // keywords itself and write them back. Not an error — this is mode B.
+    if pairs.is_empty() {
+        println!("{} paper(s) need keywords:\n", candidates.len());
+        for paper in &candidates {
+            let abstract_snippet: String = paper.abstract_text.chars().take(200).collect();
+            println!("{}\n  {}\n  {}\n", paper.id, paper.title, abstract_snippet);
+        }
+        println!(
+            "No [llm] provider configured. Generate 5-10 English keywords per paper \n\
+             (synonyms, expanded acronyms, alternative phrasings) and store them with:\n\
+             \n  research enrich <ID> --keywords \"kw1; kw2; kw3\"\n"
+        );
+        return Ok(());
+    }
+
+    let mut written = 0usize;
+    let mut failed = 0usize;
+    for (paper_id, kws) in &pairs {
+        match store.set_paper_keywords(paper_id, kws) {
+            Ok(()) => written += 1,
+            // A hallucinated id is the model's error, not a reason to abort the
+            // whole batch — the other papers still get their keywords.
+            Err(e) => {
+                eprintln!("Warning: could not set keywords for {paper_id}: {e}");
+                failed += 1;
+            }
+        }
+    }
+    println!("Enriched {written} paper(s).");
+    if failed > 0 {
+        println!("{failed} paper(s) skipped (see warnings above).");
     }
     Ok(())
 }
