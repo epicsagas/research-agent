@@ -44,7 +44,13 @@ impl DashboardConfig {
     }
 
     pub fn is_loopback(&self) -> bool {
-        self.host_or_default().starts_with("127.0.0.1") || self.host_or_default() == "localhost"
+        // Parse, don't prefix-match: "127.0.0.1.evil.com" is a DNS name, not
+        // the loopback address, and must not be trusted as one.
+        let host = self.host_or_default();
+        host == "localhost"
+            || host
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|ip| ip.is_loopback())
     }
 }
 
@@ -183,6 +189,27 @@ pub fn config_template(cfg: &Config) -> String {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn loopback_check_parses_the_host_instead_of_prefix_matching() {
+        let host = |h: &str| DashboardConfig {
+            host: Some(h.into()),
+            ..Default::default()
+        };
+        assert!(host("127.0.0.1").is_loopback());
+        assert!(host("127.0.0.5").is_loopback());
+        assert!(host("localhost").is_loopback());
+        assert!(host("::1").is_loopback());
+        assert!(
+            DashboardConfig::default().is_loopback(),
+            "default binds loopback"
+        );
+        // A DNS name that merely starts with the loopback literal is not
+        // loopback; treating it as one would waive the token requirement.
+        assert!(!host("127.0.0.1.evil.com").is_loopback());
+        assert!(!host("0.0.0.0").is_loopback());
+        assert!(!host("192.168.1.10").is_loopback());
+    }
 
     #[test]
     fn default_db_is_under_home_research() {
