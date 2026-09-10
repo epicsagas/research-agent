@@ -345,6 +345,9 @@
   .manual li { margin:3px 0; }
   .manual b { color:var(--ink); }
   .manual a { color:var(--d5); }
+  /* gap-table topic pills; click scopes the table to that topic */
+  button.gtopic { font:11px var(--sans); color:var(--ink-dim); background:var(--surface-2); border:1px solid var(--line); border-radius:10px; padding:1px 8px; cursor:pointer; white-space:nowrap; }
+  button.gtopic:hover { color:var(--ink); border-color:var(--ink-faint); }
 </style>
 </head>
 <body>
@@ -432,8 +435,15 @@ async function api(path, opts) {
 const state = {
   papers: [], papersLoaded: false,
   paperFilter: "all", paperSort: "recent", query: "",
+  paperTopic: "all",
   historyFilter: "all",
+  topics: [], topicQuery: "", topicSort: "name", topicFilter: "all",
+  showSubtopics: false, reportsShowAll: false,
 };
+/* Results page payload cache: re-rendering on filter changes must not refetch. */
+let resultsCache = null;
+const TOPIC_COLLAPSE_AT = 30;
+const REPORTS_CAP = 20;
 
 const ROUTES = ["overview","papers","pipeline","history","results","config","manual"];
 function route() {
@@ -548,6 +558,96 @@ async function patchPaper(id, body, papers) {
 }
 
 /* ───────────────────────── pages ───────────────────────── */
+/* ───────────────────────── results page ───────────────────────── */
+/* Re-renders from the cached payload on every filter change; /api/results
+   is fetched once per visit. */
+function drawResults() {
+  const { topics, gaps, reps } = resultsCache;
+  // A filter naming a since-deleted topic would show a blank table with no
+  // way to see why — drop it instead.
+  if (state.topicFilter !== "all" && !topics.some(t => t.id === state.topicFilter)) {
+    state.topicFilter = "all";
+  }
+  const tname = {};
+  topics.forEach(t => { tname[t.id] = t.name; });
+
+  // Topics: search, sort, and collapse deep levels on big lists.
+  const tq = state.topicQuery.trim().toLowerCase();
+  let tlist = topics.filter(t => !tq || t.name.toLowerCase().includes(tq));
+  const sorter = {
+    name: (a,b) => a.name.localeCompare(b.name),
+    coverage: (a,b) => (b.state ? b.state.coverage_score : 0) - (a.state ? a.state.coverage_score : 0),
+    gaps: (a,b) => (b.state ? b.state.gaps_identified : 0) - (a.state ? a.state.gaps_identified : 0),
+  }[state.topicSort];
+  tlist = tlist.slice().sort(sorter);
+  const expanded = state.showSubtopics || tlist.length <= TOPIC_COLLAPSE_AT;
+  const visible = expanded ? tlist : tlist.filter(t => (t.depth || 0) === 0);
+  const hidden = tlist.length - visible.length;
+
+  // Gaps: optional topic scope; the topic cell click-scopes the table too.
+  const glist = state.topicFilter === "all" ? gaps : gaps.filter(g => g.topic_id === state.topicFilter);
+
+  const shownReps = state.reportsShowAll ? reps : reps.slice(0, REPORTS_CAP);
+
+  $("main").innerHTML = `
+    <div class="page-head"><h1>Results</h1>
+      <span class="page-sub">${nfmt(gaps.length)} gaps · ${nfmt(reps.length)} reports · ${nfmt(topics.length)} topics</span></div>
+    <div class="section-h" style="margin-top:24px">Topics</div>
+    ${topics.length ? `
+      <div class="toolbar">
+        <div class="search">${ICON.search}<input id="t-query" placeholder="Filter topics" value="${esc(state.topicQuery)}"></div>
+        <select id="t-sort" style="margin-left:auto">
+          <option value="name"${state.topicSort === "name" ? " selected" : ""}>By name</option>
+          <option value="coverage"${state.topicSort === "coverage" ? " selected" : ""}>By coverage</option>
+          <option value="gaps"${state.topicSort === "gaps" ? " selected" : ""}>By gaps</option>
+        </select>
+      </div>
+      ${visible.length ? topicRows(visible, false) : nothing("No topics match.")}
+      ${hidden > 0 ? '<button class="btn ghost" id="t-toggle">Show ' + hidden + " sub-topic" + (hidden === 1 ? "" : "s") + "</button>" : ""}`
+    : nothing("No topics yet — create one from the command line.")}
+    <div class="section-h">Knowledge gaps</div>
+    ${topics.length ? `<div class="toolbar"><select id="g-topic" title="Scope gaps to one topic">
+        <option value="all">All topics</option>
+        ${topics.map(t => '<option value="' + esc(t.id) + '"' + (state.topicFilter === t.id ? " selected" : "") + ">" + esc(t.name) + "</option>").join("")}
+      </select></div>` : ""}
+    ${glist.length ? `<table><thead><tr><th style="width:130px">Priority</th><th>Description</th><th style="width:160px">Topic</th><th style="width:190px">Type</th><th style="width:100px">Found</th></tr></thead><tbody>
+        ${glist.map(g => '<tr><td><div class="rbar" style="width:100px"><i style="width:'+pct(g.priority)+'%;background:var(--c-amber)"></i></div><span class="faint mono">'+(g.priority||0).toFixed(2)+"</span></td>" +
+          "<td>" + esc(g.description) + "</td>" +
+          '<td><button class="gtopic" data-t="' + esc(g.topic_id) + '" title="Scope gaps to this topic">' + esc(tname[g.topic_id] || "—") + "</button></td>" +
+          '<td><span class="gtype"><span class="sw" style="background:'+(GAP_COLOR[g.gap_type]||"var(--ink-faint)")+'"></span>'+esc(title_((g.gap_type||"").replace(/_/g," ")))+"</span></td>" +
+          "<td>" + esc(day(g.discovered_at)) + "</td></tr>").join("")}
+      </tbody></table>` : nothing(state.topicFilter === "all" ? "No gaps recorded — run gap analysis on a topic." : "No gaps for this topic.")}
+    <div class="section-h">Reports</div>
+    ${reps.length ? shownReps.map((rep, i) =>
+        '<div class="rep-row"><span class="rt" data-rep="' + i + '">' + esc(rep.title) + "</span>" +
+        '<span class="rm">' + rep.sections.length + " sections · " + esc(day(rep.generated_at)) + "</span>" +
+        '<button class="readbtn" data-rep="' + i + '">Read</button></div>').join("") +
+      (reps.length > REPORTS_CAP && !state.reportsShowAll ? '<button class="btn ghost" id="rep-all">Show all ' + reps.length + " reports</button>" : "")
+      : nothing("No reports yet — generate one for a topic.")}`;
+
+  const tquery = $("t-query");
+  if (tquery) tquery.addEventListener("input", () => {
+    const pos = tquery.selectionStart;
+    state.topicQuery = tquery.value;
+    drawResults();
+    const again = $("t-query");
+    again.focus();
+    again.setSelectionRange(pos, pos);
+  });
+  const tsort = $("t-sort");
+  if (tsort) tsort.addEventListener("change", () => { state.topicSort = tsort.value; drawResults(); });
+  const ttoggle = $("t-toggle");
+  if (ttoggle) ttoggle.addEventListener("click", () => { state.showSubtopics = true; drawResults(); });
+  const gtopic = $("g-topic");
+  if (gtopic) gtopic.addEventListener("change", () => { state.topicFilter = gtopic.value; drawResults(); });
+  const repAll = $("rep-all");
+  if (repAll) repAll.addEventListener("click", () => { state.reportsShowAll = true; drawResults(); });
+  $("main").querySelectorAll(".gtopic").forEach(b =>
+    b.addEventListener("click", () => { state.topicFilter = b.dataset.t; drawResults(); }));
+  $("main").querySelectorAll("[data-rep]").forEach(el =>
+    el.addEventListener("click", () => openReader(resultsCache.reps[+el.dataset.rep])));
+}
+
 const pages = {
 
   overview: async () => {
@@ -616,7 +716,13 @@ const pages = {
       $("main").innerHTML = '<div class="page-head"><h1>Papers</h1></div>' +
         '<div class="toolbar"></div><div class="skel w80"></div><div class="skel w60"></div><div class="skel w80"></div>';
     }
-    const data = await api("/api/papers");
+    const [data] = await Promise.all([
+      api("/api/papers" + (state.paperTopic === "all" ? "" : "?topic=" + encodeURIComponent(state.paperTopic))),
+      // Topic names for the filter dropdown, fetched once per session. If it
+      // fails, drop any active scope — the dropdown could not show it.
+      state.topics.length ? Promise.resolve()
+        : api("/api/results").then(r => { state.topics = r.topics; }).catch(() => { state.paperTopic = "all"; }),
+    ]);
     state.papers = data.papers;
     state.papersLoaded = true;
     if (arg) { openDrawer(arg); }
@@ -777,29 +883,15 @@ research report --topic a,b --title "..."</pre>
     drawNav({});
     $("main").innerHTML = '<div class="page-head"><h1>Results</h1></div><div class="skel w60"></div>';
     const r = await api("/api/results");
-    const gaps = r.gaps.slice().sort((a,b) => (b.priority||0)-(a.priority||0));
-    const reps = r.reports.slice().sort((a,b) => (b.generated_at||"").localeCompare(a.generated_at||""));
-    $("main").innerHTML = `
-      <div class="page-head"><h1>Results</h1>
-        <span class="page-sub">${nfmt(r.gaps.length)} gaps · ${nfmt(r.reports.length)} reports</span></div>
-      <div class="section-h" style="margin-top:24px">Topics</div>
-      ${r.topics.length ? topicRows(r.topics, false) : nothing("No topics yet — create one from the command line.")}
-      <div class="section-h">Knowledge gaps</div>
-      ${gaps.length ? `<table><thead><tr><th style="width:130px">Priority</th><th>Description</th><th style="width:190px">Type</th><th style="width:100px">Found</th></tr></thead><tbody>
-        ${gaps.map(g => '<tr><td><div class="rbar" style="width:100px"><i style="width:'+pct(g.priority)+'%;background:var(--c-amber)"></i></div><span class="faint mono">'+(g.priority||0).toFixed(2)+"</span></td>" +
-          "<td>" + esc(g.description) + "</td>" +
-          '<td><span class="gtype"><span class="sw" style="background:'+(GAP_COLOR[g.gap_type]||"var(--ink-faint)")+'"></span>'+esc(title_((g.gap_type||"").replace(/_/g," ")))+"</span></td>" +
-          "<td>" + esc(day(g.discovered_at)) + "</td></tr>").join("")}
-      </tbody></table>` : nothing("No gaps recorded — run gap analysis on a topic.")}
-      <div class="section-h">Reports</div>
-      ${reps.length ? reps.map((rep, i) =>
-        '<div class="rep-row"><span class="rt" data-rep="' + i + '">' + esc(rep.title) + "</span>" +
-        '<span class="rm">' + rep.sections.length + " sections · " + esc(day(rep.generated_at)) + "</span>" +
-        '<button class="readbtn" data-rep="' + i + '">Read</button></div>').join("")
-        : nothing("No reports yet — generate one for a topic.")}`;
-    $("main").querySelectorAll("[data-rep]").forEach(el =>
-      el.addEventListener("click", () => openReader(reps[+el.dataset.rep])));
+    state.topics = r.topics;
+    resultsCache = {
+      topics: r.topics,
+      gaps: r.gaps.slice().sort((a,b) => (b.priority||0)-(a.priority||0)),
+      reps: r.reports.slice().sort((a,b) => (b.generated_at||"").localeCompare(a.generated_at||"")),
+    };
+    drawResults();
   },
+
 
   config: async () => {
     drawNav({});
@@ -1012,6 +1104,10 @@ function drawPapersPage() {
         <button class="chip" data-f="all">All</button>
         ${READS.map(s => '<button class="chip" data-f="' + s + '">' + esc(READ_LABEL[s]) + "</button>").join("")}
       </div>
+      <select id="ptopic" title="Scope to one topic">
+        <option value="all">All topics</option>
+        ${state.topics.map(t => '<option value="' + esc(t.id) + '"' + (state.paperTopic === t.id ? " selected" : "") + ">" + esc(t.name) + "</option>").join("")}
+      </select>
       <select id="sort" style="margin-left:auto">
         <option value="recent">Recently added</option>
         <option value="relevance">Relevance</option>
@@ -1023,6 +1119,15 @@ function drawPapersPage() {
   const q = $("q");
   q.addEventListener("input", () => { state.query = q.value; drawPaperTable(); });
   q.addEventListener("keydown", e => { if (e.key === "Escape") { q.value = ""; state.query = ""; drawPaperTable(); } });
+  const ptopic = $("ptopic");
+  ptopic.value = state.paperTopic;
+  ptopic.addEventListener("change", async () => {
+    state.paperTopic = ptopic.value;
+    $("p-table").innerHTML = '<div class="skel w80"></div><div class="skel w60"></div>';
+    const data = await api("/api/papers" + (state.paperTopic === "all" ? "" : "?topic=" + encodeURIComponent(state.paperTopic)));
+    state.papers = data.papers;
+    drawPaperTable();
+  });
   $("f-chips").querySelectorAll(".chip").forEach(b => {
     if (b.dataset.f === state.paperFilter) b.classList.add("on");
     b.addEventListener("click", () => {

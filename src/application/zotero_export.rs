@@ -10,6 +10,7 @@ use async_trait::async_trait;
 
 use crate::adapters::bib_importer::normalize_doi;
 use crate::adapters::zotero_write::{RemoteItem, merge_tags};
+use crate::domain::paper::Paper;
 use crate::error::Result;
 use crate::ports::index_store::IndexStore;
 
@@ -84,26 +85,37 @@ pub async fn export_tags_to_zotero(
     }
 
     let mut report = ExportReport::default();
-    // DOIs already written this pass: after a successful write the cached
-    // item version is stale, so a second library paper with the same DOI
-    // would turn into a spurious conflict.
-    let mut written: std::collections::HashSet<String> = std::collections::HashSet::new();
-    // DOIs whose item came back in conflict: retrying with the same stale
-    // version is a doomed write, so siblings on the same DOI skip directly.
-    let mut conflicted: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for paper in store.list_papers(None)? {
+    // Papers are grouped by DOI before any write: siblings sharing a DOI
+    // target one Zotero item, so their tag sets must merge into a single
+    // write. Writing per paper would let the second paper's tags be judged
+    // against a tag set the first one already pushed, and silently dropped.
+    let mut groups: Vec<(String, Vec<&Paper>)> = Vec::new();
+    let mut group_of: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let papers = store.list_papers(None)?;
+    for paper in &papers {
         // Stored DOIs are normalized at import; normalizing again is free and
         // keeps matching exact even for rows that predate that guarantee.
         let Some(doi) = paper.doi.as_deref().and_then(normalize_doi) else {
             report.skipped_no_doi += 1;
             continue;
         };
-        let Some(items) = by_doi.get(&doi) else {
+        if !by_doi.contains_key(&doi) {
             report.skipped_not_in_zotero += 1;
             continue;
-        };
+        }
+        match group_of.get(&doi) {
+            Some(&idx) => groups[idx].1.push(paper),
+            None => {
+                group_of.insert(doi.clone(), groups.len());
+                groups.push((doi, vec![paper]));
+            }
+        }
+    }
+
+    for (doi, members) in groups {
+        let items = &by_doi[&doi];
         let &[item] = items.as_slice() else {
-            report.skipped_ambiguous += 1;
+            report.skipped_ambiguous += members.len();
             continue;
         };
         // Compare against the item's tags the way merge would store them:
@@ -114,39 +126,34 @@ pub async fn export_tags_to_zotero(
             .map(|t| t.trim().to_string())
             .filter(|t| !t.is_empty())
             .collect();
-        let merged = merge_tags(&current, &paper.tags);
-        if merged == current {
-            report.unchanged += 1;
-            continue;
+        // Union of every sibling's tags, so one write carries them all.
+        let mut merged = current.clone();
+        for paper in &members {
+            merged = merge_tags(&merged, &paper.tags);
         }
-        if written.contains(&doi) {
-            // Already pushed this pass; the tag set in Zotero now includes
-            // everything this paper would add.
-            report.unchanged += 1;
+        if merged == current {
+            report.unchanged += members.len();
             continue;
         }
         // New-tag count measured against the trimmed tag set merge started
         // from: item.tags may carry whitespace-only entries merge drops, so
         // subtracting its length could underflow.
         let added = merged.len() - current.len();
-        if conflicted.contains(&doi) {
-            report.skipped_conflict += 1;
-            continue;
-        }
+        let titles: Vec<String> = members
+            .iter()
+            .map(|p| format!("{}: +{added} tag(s)", p.title))
+            .collect();
         if !apply {
-            report
-                .updates
-                .push(format!("{}: +{added} tag(s)", paper.title));
+            report.updates.extend(titles);
             continue;
         }
         if sink.write_tags(&item.key, item.version, &merged).await? {
-            written.insert(doi);
-            report
-                .updates
-                .push(format!("{}: +{added} tag(s)", paper.title));
+            report.updates.extend(titles);
         } else {
-            conflicted.insert(doi);
-            report.skipped_conflict += 1;
+            // Version conflict: the item changed in Zotero since the read.
+            // Retrying with the same stale version is doomed, so every
+            // sibling on this DOI is reported skipped, not re-attempted.
+            report.skipped_conflict += members.len();
         }
     }
     Ok(report)
@@ -155,7 +162,6 @@ pub async fn export_tags_to_zotero(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::paper::Paper;
     use std::sync::Mutex;
 
     struct FakeSink {
@@ -351,6 +357,59 @@ mod tests {
         }]);
         let report = run(vec![paper("P", "10.1/a", &["mine"])], &sink, true).await;
         assert_eq!(report.updates, vec!["P: +1 tag(s)"]);
+    }
+
+    #[tokio::test]
+    async fn sibling_papers_on_one_doi_contribute_all_their_tags() {
+        // P1 and P2 share a DOI, so they target the same Zotero item. One
+        // write must carry both tag sets: judging P2 against the set P1 just
+        // pushed would drop "y" silently.
+        let sink = FakeSink::new(vec![remote("K1", "10.1/a", &["old"])]);
+        let report = run(
+            vec![paper("P1", "10.1/a", &["x"]), paper("P2", "10.1/a", &["y"])],
+            &sink,
+            true,
+        )
+        .await;
+        let writes = sink.writes.lock().unwrap();
+        assert_eq!(writes.len(), 1, "one item, one write");
+        // Sibling order follows the store's row order, which is not part of
+        // the contract; only the tag set is.
+        let mut written = writes[0].1.clone();
+        written.sort();
+        assert_eq!(written, vec!["old", "x", "y"]);
+        assert_eq!(report.updates.len(), 2, "both papers reported");
+    }
+
+    #[tokio::test]
+    async fn sibling_papers_adding_nothing_are_all_unchanged() {
+        let sink = FakeSink::new(vec![remote("K1", "10.1/a", &["same"])]);
+        let report = run(
+            vec![
+                paper("P1", "10.1/a", &["same"]),
+                paper("P2", "10.1/a", &["same"]),
+            ],
+            &sink,
+            true,
+        )
+        .await;
+        assert_eq!(report.unchanged, 2);
+        assert!(sink.writes.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn ambiguous_doi_counts_every_sibling_paper() {
+        let sink = FakeSink::new(vec![
+            remote("K1", "10.1/a", &["one"]),
+            remote("K2", "10.1/a", &["two"]),
+        ]);
+        let report = run(
+            vec![paper("P1", "10.1/a", &["x"]), paper("P2", "10.1/a", &["y"])],
+            &sink,
+            false,
+        )
+        .await;
+        assert_eq!(report.skipped_ambiguous, 2);
     }
 
     #[tokio::test]

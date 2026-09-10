@@ -681,7 +681,7 @@ async fn download_arxiv_bodies(
                 store.set_paper_body(&paper.id, &body)?;
                 fetched += 1;
                 // arXiv asks automated fetches to space themselves out.
-                std::thread::sleep(std::time::Duration::from_secs(1));
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             }
             Ok(None) => eprintln!("Warning: no text extracted from {arxiv_id}"),
             Err(e) => eprintln!("Warning: {arxiv_id}: {e}"),
