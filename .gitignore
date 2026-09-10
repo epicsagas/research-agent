@@ -218,3 +218,4 @@ research.toml
 .playwright-mcp/
 fastembed_cache/
 benchmarks/results/
+benchmarks/baselines/BASELINE-*.json
