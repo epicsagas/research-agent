@@ -39,7 +39,28 @@ impl ZoteroWrite {
     pub fn new() -> Self {
         let base_url =
             std::env::var("ZOTERO_BASE_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.to_string());
-        let server_id = std::env::var("ZOTERO_SERVER_ID").ok().filter(|s| !s.is_empty());
+        let server_id = std::env::var("ZOTERO_SERVER_ID")
+            .ok()
+            .filter(|s| !s.is_empty());
+        // The write path PATCHes item data to the configured host; a
+        // non-loopback target would send library metadata off-machine, so
+        // say so loudly rather than silently trusting the env.
+        let host = base_url
+            .split("://")
+            .nth(1)
+            .unwrap_or("")
+            .split('/')
+            .next()
+            .unwrap_or("");
+        if !host.is_empty()
+            && host != "localhost"
+            && !host.starts_with("127.")
+            && !host.starts_with("[::1]")
+        {
+            eprintln!(
+                "warning: ZOTERO_BASE_URL points at {host} — Zotero writes (and item data) will be sent there"
+            );
+        }
         Self::with_base_url(base_url, server_id)
     }
 
@@ -56,51 +77,9 @@ impl ZoteroWrite {
         }
     }
 
-    /// One item as the write path sees it: key, version, normalized DOI,
-    /// current tags.
-    pub async fn fetch_item(&self, key: &str) -> Result<RemoteItem> {
-        let resp = self
-            .client
-            .get(format!("{}users/0/items/{key}", self.base_url))
-            .query(&[("format", "json")])
-            .send()
-            .await
-            .map_err(|e| {
-                if e.is_connect() {
-                    ResearchError::Source(format!(
-                        "could not reach Zotero at {} (is Zotero running?): {e}",
-                        self.base_url
-                    ))
-                } else {
-                    ResearchError::Source(format!("Zotero request failed: {e}"))
-                }
-            })?;
-        let status = resp.status();
-        if !status.is_success() {
-            return Err(status_error(status));
-        }
-        let body = resp
-            .text()
-            .await
-            .map_err(|e| ResearchError::Source(format!("Zotero response read failed: {e}")))?;
-        let item: ApiItem = serde_json::from_str(&body)
-            .map_err(|e| ResearchError::Source(format!("Zotero item parse failed: {e}")))?;
-        Ok(RemoteItem {
-            key: item.key,
-            version: item.version,
-            doi: item.data.normalized_doi(),
-            tags: item.data.tag_strings(),
-        })
-    }
-
     /// Write one merged tag set. Returns `false` when the item changed under
     /// us (version conflict): the caller reports it, nothing is merged.
-    pub async fn patch_tags(
-        &self,
-        key: &str,
-        version: i64,
-        tags: &[String],
-    ) -> Result<bool> {
+    pub async fn patch_tags(&self, key: &str, version: i64, tags: &[String]) -> Result<bool> {
         let mut req = self
             .client
             .patch(format!("{}users/0/items/{key}", self.base_url))
@@ -196,9 +175,10 @@ impl ZoteroWrite {
             if !status.is_success() {
                 return Err(status_error(status));
             }
-            let body = resp.text().await.map_err(|e| {
-                ResearchError::Source(format!("Zotero response read failed: {e}"))
-            })?;
+            let body = resp
+                .text()
+                .await
+                .map_err(|e| ResearchError::Source(format!("Zotero response read failed: {e}")))?;
             let page: Vec<ApiItem> = serde_json::from_str(&body).map_err(|e| {
                 ResearchError::Source(format!("Zotero local API response parse failed: {e}"))
             })?;
@@ -249,6 +229,13 @@ fn status_error(status: reqwest::StatusCode) -> ResearchError {
                 .to_string(),
         );
     }
+    if status == reqwest::StatusCode::METHOD_NOT_ALLOWED {
+        return ResearchError::Source(
+            "Zotero rejected the write (HTTP 405) — pushing tags needs Zotero \
+             10 or newer; older versions serve a read-only local API"
+                .to_string(),
+        );
+    }
     ResearchError::Source(format!("Zotero local API returned HTTP {status}"))
 }
 
@@ -259,7 +246,11 @@ mod tests {
     #[test]
     fn merge_keeps_existing_order_then_appends_new() {
         let existing = vec!["quantum sensing".into(), "diamond".into()];
-        let extra = vec!["to-read".into(), "quantum sensing".into(), "  diamond  ".into()];
+        let extra = vec![
+            "to-read".into(),
+            "quantum sensing".into(),
+            "  diamond  ".into(),
+        ];
         assert_eq!(
             merge_tags(&existing, &extra),
             vec!["quantum sensing", "diamond", "to-read"]

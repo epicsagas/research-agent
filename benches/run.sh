@@ -8,7 +8,13 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-cargo bench --bench core -- --quick >/dev/null 2>&1
+bench_log=$(mktemp)
+trap 'rm -f "$bench_log"' EXIT
+if ! cargo bench --bench core -- --quick >"$bench_log" 2>&1; then
+  # A build or run failure is a real problem (unlike slow timings): show it.
+  tail -30 "$bench_log" >&2
+  exit 1
+fi
 
 BENCH_JSON=$(python3 - <<'PY'
 import glob, json, os

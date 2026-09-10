@@ -33,6 +33,9 @@ pub struct ExportReport {
     pub unchanged: usize,
     pub skipped_no_doi: usize,
     pub skipped_not_in_zotero: usize,
+    /// Several Zotero items share the paper's DOI; picking one would be a
+    /// guess, so all of them are left alone.
+    pub skipped_ambiguous: usize,
     /// Version conflict: the Zotero item changed since the read. Never
     /// merged; the user resolves it in Zotero.
     pub skipped_conflict: usize,
@@ -42,11 +45,12 @@ impl ExportReport {
     /// One human line for the CLI: totals first, then up to a few updates.
     pub fn summary(&self) -> String {
         let mut line = format!(
-            "{} matched, {} unchanged, {} without DOI, {} not in Zotero, {} changed in Zotero",
+            "{} matched, {} unchanged, {} without DOI, {} not in Zotero, {} ambiguous DOI, {} changed in Zotero",
             self.updates.len(),
             self.unchanged,
             self.skipped_no_doi,
             self.skipped_not_in_zotero,
+            self.skipped_ambiguous,
             self.skipped_conflict,
         );
         if let Some(first) = self.updates.first() {
@@ -69,15 +73,21 @@ pub async fn export_tags_to_zotero(
 ) -> Result<ExportReport> {
     let remote = sink.library().await?;
     // Normalize both sides at match time, so the exporter never depends on
-    // the sink (or the import path) having normalized already.
-    let by_doi: std::collections::HashMap<String, &RemoteItem> = remote
-        .iter()
-        .filter_map(|item| {
-            item.doi.as_deref().and_then(normalize_doi).map(|doi| (doi, item))
-        })
-        .collect();
+    // the sink (or the import path) having normalized already. Items sharing
+    // a DOI are collected: a match must be unambiguous or it is skipped.
+    let mut by_doi: std::collections::HashMap<String, Vec<&RemoteItem>> =
+        std::collections::HashMap::new();
+    for item in &remote {
+        if let Some(doi) = item.doi.as_deref().and_then(normalize_doi) {
+            by_doi.entry(doi).or_default().push(item);
+        }
+    }
 
     let mut report = ExportReport::default();
+    // DOIs already written this pass: after a successful write the cached
+    // item version is stale, so a second library paper with the same DOI
+    // would turn into a spurious conflict.
+    let mut written: std::collections::HashSet<String> = std::collections::HashSet::new();
     for paper in store.list_papers(None)? {
         // Stored DOIs are normalized at import; normalizing again is free and
         // keeps matching exact even for rows that predate that guarantee.
@@ -85,20 +95,43 @@ pub async fn export_tags_to_zotero(
             report.skipped_no_doi += 1;
             continue;
         };
-        let Some(item) = by_doi.get(doi.as_str()) else {
+        let Some(items) = by_doi.get(&doi) else {
             report.skipped_not_in_zotero += 1;
             continue;
         };
-        let merged = merge_tags(&item.tags, &paper.tags);
-        if merged.len() == item.tags.len() {
+        let &[item] = items.as_slice() else {
+            report.skipped_ambiguous += 1;
+            continue;
+        };
+        // Compare against the item's tags the way merge would store them:
+        // padding-only differences are not a change worth a write.
+        let current: Vec<String> = item
+            .tags
+            .iter()
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty())
+            .collect();
+        let merged = merge_tags(&current, &paper.tags);
+        if merged == current {
+            report.unchanged += 1;
+            continue;
+        }
+        if written.contains(&doi) {
+            // Already pushed this pass; the tag set in Zotero now includes
+            // everything this paper would add.
             report.unchanged += 1;
             continue;
         }
         if !apply {
-            report.updates.push(format!("{}: +{} tag(s)", paper.title, merged.len() - item.tags.len()));
+            report.updates.push(format!(
+                "{}: +{} tag(s)",
+                paper.title,
+                merged.len() - item.tags.len()
+            ));
             continue;
         }
         if sink.write_tags(&item.key, item.version, &merged).await? {
+            written.insert(doi);
             report.updates.push(format!(
                 "{}: +{} tag(s)",
                 paper.title,
@@ -167,8 +200,8 @@ mod tests {
 
     async fn run(papers: Vec<Paper>, sink: &FakeSink, apply: bool) -> ExportReport {
         let dir = tempfile::tempdir().unwrap();
-        let store = crate::adapters::sqlite_store::SqliteStore::open(&dir.path().join("t.db"))
-            .unwrap();
+        let store =
+            crate::adapters::sqlite_store::SqliteStore::open(&dir.path().join("t.db")).unwrap();
         for p in &papers {
             store.insert_paper(p).unwrap();
         }
@@ -185,7 +218,10 @@ mod tests {
         )
         .await;
         assert_eq!(report.updates.len(), 1);
-        assert!(sink.writes.lock().unwrap().is_empty(), "dry-run must not write");
+        assert!(
+            sink.writes.lock().unwrap().is_empty(),
+            "dry-run must not write"
+        );
     }
 
     #[tokio::test]
@@ -252,11 +288,46 @@ mod tests {
             unchanged: 2,
             skipped_no_doi: 3,
             skipped_not_in_zotero: 4,
+            skipped_ambiguous: 6,
             skipped_conflict: 5,
         };
         let s = report.summary();
-        for needle in ["1 matched", "2 unchanged", "3 without DOI", "4 not in Zotero", "5 changed in Zotero"] {
+        for needle in [
+            "1 matched",
+            "2 unchanged",
+            "3 without DOI",
+            "4 not in Zotero",
+            "6 ambiguous DOI",
+            "5 changed in Zotero",
+        ] {
             assert!(s.contains(needle), "summary missing {needle}: {s}");
         }
+    }
+
+    #[tokio::test]
+    async fn whitespace_only_tag_difference_counts_as_unchanged() {
+        // merge trims: the Zotero item's " diamond " collapses to "diamond",
+        // which the library already has — that must not become a write.
+        let sink = FakeSink::new(vec![RemoteItem {
+            key: "K1".into(),
+            version: 7,
+            doi: Some("10.1/a".into()),
+            tags: vec![" diamond ".into()],
+        }]);
+        let report = run(vec![paper("P", "10.1/a", &["diamond"])], &sink, true).await;
+        assert_eq!(report.unchanged, 1);
+        assert!(sink.writes.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn ambiguous_doi_skips_instead_of_guessing() {
+        let sink = FakeSink::new(vec![
+            remote("K1", "10.1/a", &["one"]),
+            remote("K2", "10.1/a", &["two"]),
+        ]);
+        let report = run(vec![paper("P", "10.1/a", &["mine"])], &sink, true).await;
+        assert_eq!(report.skipped_ambiguous, 1);
+        assert!(report.updates.is_empty());
+        assert!(sink.writes.lock().unwrap().is_empty());
     }
 }

@@ -9,7 +9,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::OnceLock;
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use research_agent::adapters::sqlite_store::SqliteStore;
 use research_agent::application::hybrid_search::HybridSearch;
 use research_agent::domain::paper::Paper;
@@ -49,7 +49,10 @@ impl EmbeddingProvider for HashEmbed {
         8
     }
 
-    fn embed(&self, text: &str) -> llm_kernel::error::Result<llm_kernel::embedding::EmbeddingResult> {
+    fn embed(
+        &self,
+        text: &str,
+    ) -> llm_kernel::error::Result<llm_kernel::embedding::EmbeddingResult> {
         let mut v = vec![0.0f32; 8];
         for token in text.to_lowercase().split_whitespace() {
             let mut h = DefaultHasher::new();
