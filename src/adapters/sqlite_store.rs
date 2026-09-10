@@ -10,7 +10,7 @@ use crate::domain::research_state::ResearchState;
 use crate::domain::research_topic::ResearchTopic;
 use crate::error::{ResearchError, Result};
 use crate::ports::index_store::{BodyEvidence, IndexStore};
-use crate::store::schema::{MIGRATION_SQL, SCHEMA_SQL, TARGET_SCHEMA_VERSION};
+use crate::store::schema::{FTS_V3_SQL, MIGRATION_SQL, SCHEMA_SQL, TARGET_SCHEMA_VERSION};
 
 pub struct SqliteStore {
     conn: Mutex<Connection>,
@@ -175,6 +175,7 @@ impl SqliteStore {
                 let raw: Option<i64> = row.get("rating")?;
                 raw.and_then(|n| u8::try_from(n).ok().and_then(|v| Rating::new(v).ok()))
             },
+            keywords: row.get("keywords").unwrap_or_default(),
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
         })
@@ -190,8 +191,8 @@ impl IndexStore for SqliteStore {
             "INSERT OR REPLACE INTO papers
              (id, title, authors, abstract_text, year, venue, doi, arxiv_id, s2_id,
               openalex_id, url, pdf_path, status, reading_status, notes, tags,
-              relevance_score, rating, created_at, updated_at)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)",
+              relevance_score, rating, keywords, created_at, updated_at)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)",
             params![
                 paper.id,
                 paper.title,
@@ -211,6 +212,7 @@ impl IndexStore for SqliteStore {
                 serde_json::to_string(&paper.tags)?,
                 paper.relevance_score,
                 paper.rating.map(|r| r.get() as i64),
+                paper.keywords,
                 paper.created_at,
                 paper.updated_at,
             ],
@@ -382,6 +384,34 @@ impl IndexStore for SqliteStore {
             Some(row) => Ok(Some(Self::paper_from_row(row)?)),
             None => Ok(None),
         }
+    }
+
+    fn set_paper_keywords(&self, id: &str, keywords: &str) -> Result<()> {
+        let conn = self.conn.lock().map_err(|e| {
+            ResearchError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let now = chrono::Utc::now().to_rfc3339();
+        // The papers_au trigger reindexes the FTS row, so no explicit index
+        // maintenance is needed here.
+        let changed = conn.execute(
+            "UPDATE papers SET keywords = ?1, updated_at = ?2 WHERE id = ?3",
+            params![keywords, now, id],
+        )?;
+        if changed == 0 {
+            return Err(ResearchError::NotFound(format!("paper {id}")));
+        }
+        Ok(())
+    }
+
+    fn papers_missing_keywords(&self, limit: usize) -> Result<Vec<Paper>> {
+        let conn = self.conn.lock().map_err(|e| {
+            ResearchError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let mut stmt = conn.prepare(
+            "SELECT * FROM papers WHERE keywords = '' ORDER BY created_at DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit as i64], Self::paper_from_row)?;
+        Ok(rows.filter_map(std::result::Result::ok).collect())
     }
 
     fn update_paper_status(&self, id: &str, status: PaperStatus) -> Result<()> {
@@ -939,6 +969,14 @@ impl IndexStore for SqliteStore {
                     tx.execute_batch(sql)?;
                 }
             }
+            // Recreate papers_fts with the `keywords` column. Ordered after the
+            // column migrations above because the recreated triggers reference
+            // `new.keywords`, and gated on the version (not a column check) —
+            // the virtual table's shape is invisible to PRAGMA table_info-style
+            // guards, and the trailing rebuild costs O(corpus).
+            if current_version < 3 {
+                tx.execute_batch(FTS_V3_SQL)?;
+            }
             tx.execute(
                 "UPDATE _meta SET value = ?1 WHERE key = 'schema_version'",
                 params![TARGET_SCHEMA_VERSION.to_string()],
@@ -1451,6 +1489,69 @@ mod tests {
             .unwrap();
         let got = store.get_paper(&paper.id).unwrap().unwrap();
         assert_eq!(got.rating.map(Rating::get), Some(5));
+    }
+
+    #[test]
+    fn init_schema_migrates_legacy_v2_to_keywords_fts() {
+        // Simulate a pre-keywords database: drop the column, restore the old
+        // 4-column FTS table and its triggers, reset the version. init_schema
+        // must add the column, rebuild the FTS table with `keywords`, and make
+        // keyword-only matches findable.
+        let store = test_store();
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute_batch(
+                // Triggers first: they reference new.keywords, so SQLite
+                // refuses to drop the column while they exist.
+                "DROP TRIGGER IF EXISTS papers_ai;
+                 DROP TRIGGER IF EXISTS papers_ad;
+                 DROP TRIGGER IF EXISTS papers_au;
+                 DROP TABLE IF EXISTS papers_fts;
+                 ALTER TABLE papers DROP COLUMN keywords;
+                 CREATE VIRTUAL TABLE papers_fts USING fts5(
+                     title, abstract_text, notes, tags,
+                     content=papers, content_rowid=rowid, tokenize='trigram');
+                 UPDATE _meta SET value = '2' WHERE key = 'schema_version';",
+            )
+            .unwrap();
+        }
+        assert_eq!(schema_version(&store), 2);
+
+        store.init_schema().unwrap();
+
+        assert_eq!(schema_version(&store), TARGET_SCHEMA_VERSION);
+        let paper = Paper::new("Linearizable registers".into());
+        store.insert_paper(&paper).unwrap();
+        store
+            .set_paper_keywords(&paper.id, "consistency model; strong consistency")
+            .unwrap();
+        // The keyword text is not in the title — only the rebuilt FTS column
+        // carries it, so a hit proves the migration wired the column in.
+        let hits = store.search_papers("consistency model", 10).unwrap();
+        assert!(hits.iter().any(|p| p.id == paper.id));
+    }
+
+    #[test]
+    fn set_paper_keywords_is_searchable_and_listed_as_missing_before() {
+        let store = test_store();
+        let paper = Paper::new("Attention mechanisms".into());
+        store.insert_paper(&paper).unwrap();
+
+        let missing = store.papers_missing_keywords(10).unwrap();
+        assert!(missing.iter().any(|p| p.id == paper.id));
+
+        store
+            .set_paper_keywords(&paper.id, "transformer; self-attention")
+            .unwrap();
+
+        let got = store.get_paper(&paper.id).unwrap().unwrap();
+        assert_eq!(got.keywords, "transformer; self-attention");
+
+        let hits = store.search_papers("self-attention", 10).unwrap();
+        assert!(hits.iter().any(|p| p.id == paper.id));
+
+        let missing_after = store.papers_missing_keywords(10).unwrap();
+        assert!(!missing_after.iter().any(|p| p.id == paper.id));
     }
 
     #[test]

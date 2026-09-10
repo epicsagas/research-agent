@@ -40,6 +40,11 @@ pub trait IndexStore: Send + Sync {
     fn vector_corpus(&self) -> Result<Vec<(i64, String)>>;
     /// Resolve a vector-index rowid back to its paper.
     fn paper_by_rowid(&self, rowid: i64) -> Result<Option<Paper>>;
+    /// Store the search-only keywords for a paper (LLM- or agent-generated).
+    /// Overwrites any previous value; the FTS update trigger reindexes the row.
+    fn set_paper_keywords(&self, id: &str, keywords: &str) -> Result<()>;
+    /// Papers that have no keywords yet — the enrichment work queue.
+    fn papers_missing_keywords(&self, limit: usize) -> Result<Vec<Paper>>;
     fn update_paper_status(&self, id: &str, status: PaperStatus) -> Result<()>;
     fn update_reading_status(&self, id: &str, status: ReadingStatus) -> Result<()>;
     fn update_rating(&self, id: &str, rating: Rating) -> Result<()>;
