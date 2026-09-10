@@ -206,13 +206,10 @@ async fn handle_conn(
     let head = String::from_utf8_lossy(&buf[..head_end]).into_owned();
     let mut parts = head.split_whitespace();
     let method = parts.next().unwrap_or("").to_string();
-    let path = parts
-        .next()
-        .unwrap_or("")
-        .split('?')
-        .next()
-        .unwrap_or("")
-        .to_string();
+    let raw_path = parts.next().unwrap_or("").to_string();
+    // Stripped form only for the /api/models special-case below; route()
+    // splits its own query string off raw_path.
+    let path = raw_path.split('?').next().unwrap_or("").to_string();
 
     // Requests with a body: read Content-Length bytes past the head (capped).
     let content_length: usize = head
@@ -283,7 +280,7 @@ async fn handle_conn(
         {
             fetch_models(&ctx).await
         } else {
-            route(&method, &path, body.as_deref(), &ctx)
+            route(&method, &raw_path, body.as_deref(), &ctx)
         }
     } else {
         // Head hit the cap without terminating: reject instead of parsing a
@@ -412,7 +409,8 @@ fn host_allowed(ctx: &RouteCtx) -> bool {
     })
 }
 
-fn route(method: &str, path: &str, body: Option<&str>, ctx: &RouteCtx) -> Response {
+fn route(method: &str, raw_path: &str, body: Option<&str>, ctx: &RouteCtx) -> Response {
+    let (path, query) = split_query(raw_path);
     // The loopback-only Host check defends against DNS rebinding while the
     // server is localhost-only. Once a token is configured the token is the
     // security boundary (rebinding cannot steal it), and legitimate remote
@@ -450,7 +448,7 @@ fn route(method: &str, path: &str, body: Option<&str>, ctx: &RouteCtx) -> Respon
         ("POST", "/api/login") => Ok(Response::error(400, "already authenticated")),
         ("POST", "/api/restart") => restart(ctx.db_override.as_deref()),
         ("GET", "/api/overview") => overview(&ctx.db_path),
-        ("GET", "/api/papers") => papers(&ctx.db_path),
+        ("GET", "/api/papers") => papers(&ctx.db_path, query),
         ("GET", p) if p.starts_with("/api/papers/") && p.ends_with("/body") => {
             paper_body(&p["/api/papers/".len()..p.len() - "/body".len()], ctx)
         }
@@ -808,10 +806,31 @@ fn overview(db_path: &Path) -> RouteResult {
     })))
 }
 
-fn papers(db_path: &Path) -> RouteResult {
+fn papers(db_path: &Path, query: Option<&str>) -> RouteResult {
     let store = SqliteStore::open(db_path)?;
-    let papers = store.list_papers(None)?;
+    let papers = match query_param(query, "topic").filter(|t| !t.is_empty()) {
+        Some(topic_id) => store.list_papers_by_topic(&topic_id, None)?,
+        None => store.list_papers(None)?,
+    };
     Ok(Response::json(json!({ "papers": papers })))
+}
+
+/// Value of the first `key=` pair in a raw query string. Percent-decoding is
+/// not needed for the one supported parameter (`topic` — UUIDs).
+fn query_param(query: Option<&str>, key: &str) -> Option<String> {
+    query?.split('&').find_map(|pair| {
+        let (k, v) = pair.split_once('=')?;
+        (k == key).then(|| v.to_string())
+    })
+}
+
+/// Split `"/p?a=1"` into `("/p", Some("a=1"))`; an empty query counts as none.
+fn split_query(raw: &str) -> (&str, Option<&str>) {
+    match raw.split_once('?') {
+        Some((path, q)) if !q.is_empty() => (path, Some(q)),
+        Some((path, _)) => (path, None),
+        None => (raw, None),
+    }
 }
 
 /// Stored full text of one paper. Ingest page anchors (`<!-- page N -->`)
@@ -1191,6 +1210,38 @@ mod tests {
         let v: Value = serde_json::from_str(&route("GET", "/api/papers", None, &ctx).body).unwrap();
         assert_eq!(v["papers"].as_array().unwrap().len(), 1);
         assert_eq!(v["papers"][0]["title"], "Attention Is All You Need");
+    }
+
+    #[test]
+    fn papers_endpoint_filters_by_topic_query() {
+        let (ctx, _dir) = ctx_with(|store| {
+            let topic = ResearchTopic::new("Transformers".into());
+            store.insert_topic(&topic).unwrap();
+            let mut paper = Paper::new("Topic paper".into());
+            paper.abstract_text = "in topic".into();
+            store.insert_paper(&paper).unwrap();
+            store
+                .insert_paper(&Paper::new("Untopiced paper".into()))
+                .unwrap();
+            store
+                .link_paper_to_topic(&paper.id, &topic.id, 0.5)
+                .unwrap();
+        });
+        // Unfiltered keeps listing everything.
+        let v: Value = serde_json::from_str(&route("GET", "/api/papers", None, &ctx).body).unwrap();
+        assert_eq!(v["papers"].as_array().unwrap().len(), 2);
+        // ?topic= scopes the listing to that topic's papers.
+        let topic_id = {
+            let store = SqliteStore::open(&ctx.db_path).unwrap();
+            store.list_topics().unwrap()[0].id.clone()
+        };
+        let v: Value = serde_json::from_str(
+            &route("GET", &format!("/api/papers?topic={topic_id}"), None, &ctx).body,
+        )
+        .unwrap();
+        let papers = v["papers"].as_array().unwrap();
+        assert_eq!(papers.len(), 1);
+        assert_eq!(papers[0]["title"], "Topic paper");
     }
 
     #[test]
