@@ -291,4 +291,22 @@ mod tests {
         let err = status_error(reqwest::StatusCode::FORBIDDEN).to_string();
         assert!(err.contains("Allow other applications"), "got: {err}");
     }
+
+    /// Live probe against a running Zotero: the paged library read works and
+    /// items carry keys. Ignored by default — needs Zotero up with the
+    /// local-API preference enabled. Run with `cargo test -- --ignored`.
+    /// Writes are deliberately not exercised here (each one pops a GUI
+    /// confirmation dialog); verify one write by hand per the README
+    /// checklist.
+    #[tokio::test]
+    #[ignore = "hits the live Zotero local API (needs Zotero running)"]
+    async fn live_library_read_returns_items() {
+        let writer = ZoteroWrite::new();
+        let items = writer.library().await.expect("library read");
+        assert!(
+            !items.is_empty(),
+            "a running Zotero with items returns them"
+        );
+        assert!(items.iter().all(|i| !i.key.is_empty()), "items carry keys");
+    }
 }
