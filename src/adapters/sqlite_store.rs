@@ -334,6 +334,18 @@ impl IndexStore for SqliteStore {
         }
     }
 
+    fn set_paper_pdf_path(&self, paper_id: &str, path: &str) -> Result<()> {
+        let conn = self.conn.lock().map_err(|e| {
+            ResearchError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "UPDATE papers SET pdf_path = ?1, updated_at = ?2 WHERE id = ?3",
+            params![path, now, paper_id],
+        )?;
+        Ok(())
+    }
+
     fn vector_corpus(&self) -> Result<Vec<(i64, String)>> {
         let conn = self.conn.lock().map_err(|e| {
             ResearchError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
@@ -982,6 +994,21 @@ mod tests {
     fn schema_version(store: &SqliteStore) -> i64 {
         let conn = store.conn.lock().unwrap();
         SqliteStore::schema_version(&conn)
+    }
+
+    #[test]
+    fn set_paper_pdf_path_roundtrips() {
+        let store = test_store();
+        let paper = Paper::new("Downloaded Paper".into());
+        store.insert_paper(&paper).unwrap();
+
+        store
+            .set_paper_pdf_path(&paper.id, "/cache/pdf/2301.00234.pdf")
+            .unwrap();
+        assert_eq!(
+            store.get_paper(&paper.id).unwrap().unwrap().pdf_path,
+            Some("/cache/pdf/2301.00234.pdf".into())
+        );
     }
 
     #[test]

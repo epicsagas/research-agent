@@ -178,6 +178,7 @@ pub fn run(
         database_path: db_path,
         llm,
         search,
+        dashboard: Default::default(),
     })
 }
 

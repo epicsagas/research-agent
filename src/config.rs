@@ -115,6 +115,36 @@ impl Default for SearchConfig {
     }
 }
 
+/// `[dashboard]` section: how the web dashboard is served. Binding to a
+/// non-loopback host requires a token — without one every request would be
+/// readable (and writable) by the whole network.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DashboardConfig {
+    /// Bind address: "127.0.0.1" (default) or "0.0.0.0" for LAN access.
+    #[serde(default)]
+    pub host: Option<String>,
+    #[serde(default)]
+    pub port: Option<u16>,
+    /// Shared secret. Requests must present it via `Authorization: Bearer`
+    /// or the `dashboard_token` cookie.
+    #[serde(default)]
+    pub token: Option<String>,
+}
+
+impl DashboardConfig {
+    pub fn host_or_default(&self) -> &str {
+        self.host.as_deref().unwrap_or("127.0.0.1")
+    }
+
+    pub fn port_or_default(&self) -> u16 {
+        self.port.unwrap_or(7777)
+    }
+
+    pub fn is_loopback(&self) -> bool {
+        self.host_or_default().starts_with("127.0.0.1") || self.host_or_default() == "localhost"
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub database_path: PathBuf,
@@ -124,6 +154,8 @@ pub struct Config {
     /// local defaults.
     #[serde(default)]
     pub search: Option<SearchConfig>,
+    #[serde(default)]
+    pub dashboard: DashboardConfig,
 }
 
 /// Returns `~/.research` on all platforms (Windows: `C:\Users\<user>\.research`).
@@ -147,6 +179,7 @@ impl Default for Config {
             database_path: default_db_path(),
             llm: None,
             search: None,
+            dashboard: DashboardConfig::default(),
         }
     }
 }
@@ -257,6 +290,32 @@ pub fn config_template(cfg: &Config) -> String {
             }
         }
     }
+
+    out.push_str("\n# Web dashboard (`research dashboard`). Loopback-only and port 7777 by\n");
+    out.push_str("# default; a non-loopback host requires a token.\n");
+    let d = &cfg.dashboard;
+    if d.host.is_some() || d.port.is_some() || d.token.is_some() {
+        out.push_str("[dashboard]\n");
+        if let Some(host) = &d.host {
+            out.push_str(&format!("host = {}\n", toml_str(host)));
+        }
+        if let Some(port) = d.port {
+            out.push_str(&format!("port = {port}\n"));
+        }
+        if let Some(token) = &d.token {
+            out.push_str(&format!("token = {}\n", toml_str(token)));
+        }
+    } else {
+        for line in [
+            "# [dashboard]",
+            "# host = \"127.0.0.1\"  # bind address; use 0.0.0.0 for LAN access (token required)",
+            "# port = 7777",
+            "# token = \"...\"  # shared secret; sent as Authorization: Bearer or dashboard_token cookie",
+        ] {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
     out
 }
 
@@ -281,6 +340,7 @@ mod tests {
             database_path: PathBuf::from("/tmp/test.db"),
             llm: None,
             search: None,
+            dashboard: Default::default(),
         };
         config.save(&path).unwrap();
         let loaded = Config::load(&path).unwrap();
@@ -309,6 +369,7 @@ mod tests {
                 base_url: None,
             }),
             search: None,
+            dashboard: Default::default(),
         };
         config.save(&path).unwrap();
         let loaded = Config::load(&path).unwrap();
@@ -350,6 +411,9 @@ mod tests {
             "api_key_env",
             "base_url",
             "openai_api_key_env",
+            "host",
+            "port",
+            "token",
         ] {
             assert!(
                 text.contains(&format!("# {key}")),
@@ -372,6 +436,7 @@ mod tests {
                 provider: "openai".into(),
                 ..SearchConfig::default()
             }),
+            dashboard: Default::default(),
         };
         let text = config_template(&config);
         let parsed: Config = toml::from_str(&text).unwrap();

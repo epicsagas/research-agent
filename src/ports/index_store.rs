@@ -31,6 +31,10 @@ pub trait IndexStore: Send + Sync {
     fn set_paper_body(&self, paper_id: &str, body: &str) -> Result<()>;
     /// Fetch the stored body text of a paper, if any.
     fn get_paper_body(&self, paper_id: &str) -> Result<Option<String>>;
+    /// Record where the paper's PDF lives on disk (a locally ingested file or
+    /// a downloaded arXiv PDF), so `reingest` can re-extract without
+    /// redownloading.
+    fn set_paper_pdf_path(&self, paper_id: &str, path: &str) -> Result<()>;
     /// (rowid, embeddable text) for every paper — the vector index corpus.
     /// The rowid is the stable join key between the store and the vector file.
     fn vector_corpus(&self) -> Result<Vec<(i64, String)>>;

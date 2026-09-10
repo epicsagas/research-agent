@@ -2,6 +2,7 @@ pub mod adapters;
 pub mod application;
 pub mod composition;
 pub mod config;
+pub mod dashboard;
 pub mod domain;
 pub mod error;
 #[cfg(feature = "mcp")]

@@ -1,0 +1,1129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>research-agent</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%2314120E'/%3E%3Cpath d='M4 4.5h5.5L11 6v5.5H4z' fill='none' stroke='%23F0BE3A' stroke-width='1.3'/%3E%3C/svg%3E">
+<style>
+  /* ── Night reading room ───────────────────────────────────────────
+     Warm ink-dark base; literature in serif, instrument in sans.
+     Reading depth = one amber ramp used everywhere depth appears.   */
+  :root {
+    --bg: #14120E;
+    --bg-deep: #100E0B;
+    --surface: #1B1813;
+    --surface-2: #221E17;
+    --line: #2C2720;
+    --line-soft: #241F19;
+    --ink: #EAE4D8;
+    --ink-dim: #A69C8A;
+    --ink-faint: #6E6656;
+
+    /* categorical (validated): sources & streams, fixed order */
+    --c-blue: #3B84BC;
+    --c-amber: #B87F10;
+    --c-purple: #A05ECF;
+    --c-green: #2FA455;
+
+    /* sequential depth ramp: discovered → deep_read */
+    --d1: #52400F; --d2: #7A5E14; --d3: #A67D1B; --d4: #D09E24; --d5: #F0BE3A;
+
+    --ok: #2FA455;
+    --warn: #D69518;
+    --bad: #C4553D;
+
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+    --r: 6px;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.55 var(--sans);
+  }
+  ::selection { background: rgba(240,190,58,.25); }
+  a { color: inherit; }
+  button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+  input, select {
+    font: inherit; color: var(--ink); background: var(--surface);
+    border: 1px solid var(--line); border-radius: var(--r);
+  }
+  input:focus-visible, select:focus-visible, button:focus-visible, [tabindex]:focus-visible {
+    outline: 2px solid var(--d5); outline-offset: 1px;
+  }
+  .mono { font-family: var(--mono); font-size: 12px; }
+  .dim { color: var(--ink-dim); }
+  .faint { color: var(--ink-faint); }
+
+  /* ── shell ── */
+  .app { display: grid; grid-template-columns: 232px 1fr; min-height: 100vh; }
+  aside {
+    background: var(--bg-deep); border-right: 1px solid var(--line);
+    padding: 22px 0 18px; display: flex; flex-direction: column;
+    position: sticky; top: 0; height: 100vh;
+  }
+  .wordmark { padding: 0 22px 20px; }
+  .wordmark .t { font: 600 17px/1.2 var(--serif); letter-spacing: .01em; }
+  .wordmark .s { color: var(--ink-faint); font-size: 11.5px; margin-top: 3px; }
+  nav { display: flex; flex-direction: column; padding: 6px 12px; gap: 1px; }
+  nav a {
+    display: flex; align-items: center; gap: 10px;
+    padding: 7px 10px; border-radius: var(--r);
+    color: var(--ink-dim); text-decoration: none; font-size: 13.5px;
+  }
+  nav a svg { width: 15px; height: 15px; flex: none; opacity: .8; }
+  nav a:hover { color: var(--ink); background: var(--surface); }
+  nav a[aria-current="page"] { color: var(--ink); background: var(--surface-2); }
+  nav a .count {
+    margin-left: auto; font-size: 11px; color: var(--ink-faint);
+    font-variant-numeric: tabular-nums;
+  }
+  nav a[aria-current="page"] .count { color: var(--ink-dim); }
+  .side-foot { margin-top: auto; padding: 14px 22px 0; border-top: 1px solid var(--line-soft); }
+  .side-foot .row { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--ink-dim); padding: 3px 0; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .dot.ok { background: var(--ok); }
+  .dot.bad { background: var(--bad); }
+  .dot.dim2 { background: var(--ink-faint); }
+
+  main { padding: 30px 36px 60px; max-width: 1160px; width: 100%; }
+  .page-head { display: flex; align-items: baseline; gap: 16px; margin-bottom: 6px; }
+  h1 { font: 600 24px/1.2 var(--serif); margin: 0; letter-spacing: .005em; }
+  .page-sub { color: var(--ink-dim); font-size: 13px; }
+  .head-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  .section-h {
+    font-size: 13px; color: var(--ink-dim); margin: 34px 0 12px;
+    padding-bottom: 8px; border-bottom: 1px solid var(--line);
+  }
+
+  /* ── tiles ── */
+  .tiles { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin: 22px 0 6px; }
+  .tile { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px 13px; }
+  .tile .n { font: 500 30px/1.1 var(--serif); font-variant-numeric: tabular-nums; }
+  .tile .l { color: var(--ink-dim); font-size: 12.5px; margin-top: 2px; }
+  .tile .x { margin-top: 10px; }
+  .depth-strip { display: flex; gap: 2px; height: 6px; }
+  .depth-strip i { flex: 1; border-radius: 2px; background: var(--line); }
+  .microbar { height: 5px; background: var(--line); border-radius: 2px; overflow: hidden; }
+  .microbar i { display: block; height: 100%; border-radius: 2px; }
+  .tile .cap { font-size: 11px; color: var(--ink-faint); margin-top: 5px; }
+
+  .cols { display: grid; grid-template-columns: 3fr 2fr; gap: 26px; align-items: start; }
+
+  /* ── funnel ── */
+  .funnel-row { display: grid; grid-template-columns: 108px 1fr 118px; align-items: center; gap: 12px; padding: 7px 0; }
+  .funnel-row .name { font-size: 13px; color: var(--ink-dim); text-align: right; }
+  .funnel-row .bar { height: 16px; display: flex; }
+  .funnel-row .bar i { height: 100%; border-radius: 0 4px 4px 0; min-width: 2px; }
+  .funnel-row .val { font-size: 12.5px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+  .funnel-row .val b { color: var(--ink); font-weight: 600; }
+  .conv { font-size: 11.5px; color: var(--ink-faint); padding: 0 0 6px 120px; }
+
+  /* ── activity / history ── */
+  .day { margin: 20px 0 6px; display: flex; align-items: baseline; gap: 10px; }
+  .day .d { font: 500 13.5px var(--serif); color: var(--ink); }
+  .day .n { font-size: 11px; color: var(--ink-faint); }
+  .day::after { content: ""; flex: 1; border-top: 1px solid var(--line-soft); transform: translateY(-3px); }
+  .ev { display: flex; align-items: baseline; gap: 10px; padding: 4.5px 0; font-size: 13px; }
+  .ev .tick { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); flex: none; width: 36px; }
+  .ev .mark { width: 8px; height: 8px; border-radius: 50%; flex: none; transform: translateY(-.5px); }
+  .ev a { text-decoration: none; }
+  .ev a:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .ev .trail { color: var(--ink-faint); font-size: 12px; }
+
+  /* ── toolbar / tables ── */
+  .toolbar { display: flex; gap: 10px; align-items: center; margin: 18px 0 12px; flex-wrap: wrap; }
+  .search { position: relative; flex: 1; min-width: 220px; max-width: 380px; }
+  .search input { width: 100%; padding: 7px 30px 7px 32px; }
+  .search svg { position: absolute; left: 10px; top: 8px; width: 15px; height: 15px; color: var(--ink-faint); }
+  .search kbd {
+    position: absolute; right: 8px; top: 7px; font: 11px var(--mono);
+    color: var(--ink-faint); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px;
+  }
+  select { padding: 6.5px 8px; }
+  .chips { display: flex; gap: 6px; }
+  .chip {
+    font-size: 12px; padding: 5px 11px; border-radius: 99px;
+    border: 1px solid var(--line); color: var(--ink-dim);
+  }
+  .chip:hover { color: var(--ink); }
+  .chip.on { background: var(--surface-2); color: var(--ink); border-color: var(--ink-faint); }
+  .chip .cn { color: var(--ink-faint); font-size: 11px; margin-left: 4px; }
+
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    text-align: left; font-weight: 400; font-size: 12px; color: var(--ink-faint);
+    padding: 8px 10px; border-bottom: 1px solid var(--line);
+  }
+  tbody td { padding: 10px; border-bottom: 1px solid var(--line-soft); vertical-align: middle; }
+  tbody tr.rowlink { cursor: pointer; }
+  tbody tr.rowlink:hover { background: var(--surface); }
+  .pt { font: 400 15px/1.35 var(--serif); color: var(--ink); }
+  .pt-sub { font-size: 12px; color: var(--ink-faint); margin-top: 2px; }
+  .pt-abs {
+    font: 400 12.5px/1.5 var(--serif); color: var(--ink-dim); margin-top: 5px;
+    max-width: 58ch; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .rowlink-ext { color: var(--ink-faint); padding: 2px; vertical-align: 1px; }
+  .rowlink-ext:hover { color: var(--d5); }
+  .sort-h { cursor: pointer; user-select: none; }
+  .sort-h:hover { color: var(--ink-dim); }
+  .sort-h .arr { font-size: 10px; }
+
+  /* depth mark: 5 segments, filled up to stage */
+  .dmark { display: inline-flex; gap: 2px; }
+  .dmark i { width: 9px; height: 5px; border-radius: 2px; background: var(--line); }
+  .dmark i.f1 { background: var(--d1); } .dmark i.f2 { background: var(--d2); }
+  .dmark i.f3 { background: var(--d3); } .dmark i.f4 { background: var(--d4); }
+  .dmark i.f5 { background: var(--d5); }
+
+  .stars { display: inline-flex; gap: 1px; }
+  .stars button { padding: 1px 2px; font-size: 14px; line-height: 1; color: var(--ink-faint); }
+  .stars button.on { color: var(--d5); }
+  .stars button:hover { color: var(--d4); }
+
+  .rbar { width: 64px; height: 5px; background: var(--line); border-radius: 2px; overflow: hidden; }
+  .rbar i { display: block; height: 100%; background: var(--c-blue); border-radius: 2px; }
+
+  .tag {
+    display: inline-block; font-size: 11px; color: var(--ink-dim);
+    border: 1px solid var(--line); border-radius: 4px; padding: 1px 7px; margin-right: 4px;
+  }
+  .gtype { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
+  .gtype .sw { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+
+  /* select in table */
+  .stepper {
+    appearance: none; -webkit-appearance: none;
+    font-size: 12px; padding: 4px 22px 4px 9px; border-radius: var(--r);
+    background: var(--surface-2) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='6'%3E%3Cpath d='M1 1l3 3 3-3' stroke='%236E6656' fill='none' stroke-width='1.4'/%3E%3C/svg%3E") no-repeat right 8px center;
+    border: 1px solid var(--line); color: var(--ink-dim); cursor: pointer;
+  }
+  .stepper:hover { color: var(--ink); }
+
+  /* ── rings ── */
+  .ring { transform: rotate(-90deg); }
+  .ring .track { stroke: var(--line); }
+  .ring .fill { stroke: var(--d4); stroke-linecap: round; transition: stroke-dashoffset .3s ease; }
+  .ringwrap { position: relative; width: 44px; height: 44px; flex: none; }
+  .ringwrap .pct {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    font-size: 10.5px; color: var(--ink-dim); font-variant-numeric: tabular-nums;
+  }
+  .topic-row { display: flex; align-items: center; gap: 14px; padding: 10px 0; border-bottom: 1px solid var(--line-soft); }
+  .topic-row:last-child { border-bottom: none; }
+  .topic-row .indent { width: calc(var(--depth, 0) * 16px); flex: none; }
+  .topic-row .nm { font: 400 15px var(--serif); }
+  .topic-row .meta { margin-left: auto; text-align: right; font-size: 12px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+
+  /* ── reports ── */
+  .rep-row { display: flex; align-items: baseline; gap: 14px; padding: 13px 0; border-bottom: 1px solid var(--line-soft); }
+  .rep-row .rt { font: 400 17px var(--serif); cursor: pointer; }
+  .rep-row .rt:hover { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--ink-faint); }
+  .rep-row .rm { margin-left: auto; flex: none; color: var(--ink-faint); font-size: 12px; }
+  .readbtn {
+    font-size: 12px; padding: 4px 12px; border: 1px solid var(--line);
+    border-radius: var(--r); color: var(--ink-dim); flex: none;
+  }
+  .readbtn:hover { color: var(--ink); border-color: var(--ink-faint); }
+
+  /* ── drawer ── */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(10,8,5,.55);
+    opacity: 0; pointer-events: none; visibility: hidden;
+    transition: opacity .18s ease, visibility .18s ease; z-index: 40;
+  }
+  .overlay.open { opacity: 1; pointer-events: auto; visibility: visible; }
+  .drawer {
+    position: fixed; top: 0; right: 0; bottom: 0; width: min(440px, 92vw);
+    background: var(--bg-deep); border-left: 1px solid var(--line);
+    transform: translateX(24px); opacity: 0; pointer-events: none; visibility: hidden;
+    transition: transform .2s ease, opacity .2s ease, visibility .2s ease;
+    z-index: 41; overflow-y: auto; padding: 26px 28px 40px;
+  }
+  .drawer.open { transform: none; opacity: 1; pointer-events: auto; visibility: visible; }
+  .drawer h2 { font: 500 21px/1.3 var(--serif); margin: 4px 0 6px; }
+  .drawer .close { position: absolute; top: 16px; right: 16px; color: var(--ink-faint); padding: 6px; }
+  .drawer .close:hover { color: var(--ink); }
+  .kv { width: 100%; margin: 6px 0; }
+  .kv td { padding: 4px 0; border: none; vertical-align: top; }
+  .kv td:first-child { color: var(--ink-faint); width: 96px; font-size: 12px; padding-top: 6px; }
+  .abstract { font: 400 14.5px/1.65 var(--serif); color: var(--ink-dim); max-width: 62ch; margin: 14px 0; }
+  .drawer .sec { border-top: 1px solid var(--line-soft); margin-top: 18px; padding-top: 14px; }
+  .drawer .sec .h { font-size: 12px; color: var(--ink-faint); margin-bottom: 8px; }
+
+  /* ── report reading modal ── */
+  .reader {
+    position: fixed; inset: 0; background: var(--bg); z-index: 50; display: none;
+    overflow-y: auto;
+  }
+  .reader.open { display: block; }
+  .reader .inner { max-width: 720px; margin: 0 auto; padding: 60px 28px 90px; }
+  .reader h1 { font-size: 30px; margin-bottom: 4px; }
+  .reader .meta { color: var(--ink-faint); font-size: 13px; margin-bottom: 34px; }
+  .reader h3 { font: 500 18px var(--serif); margin: 30px 0 10px; }
+  .reader .body { font: 400 15.5px/1.75 var(--serif); color: #CFC7B8; max-width: 66ch; white-space: pre-wrap; }
+  .reader .page-anchor { display: flex; align-items: center; gap: 12px; margin: 26px 0 14px; font: 500 11px var(--sans); letter-spacing: .08em; color: var(--ink-dim); }
+  .reader .pdf { width: 100%; height: calc(100vh - 60px); border: 1px solid var(--line); border-radius: var(--r); background: #525659; }
+  .reader .page-anchor::before, .reader .page-anchor::after { content: ""; flex: 1; height: 1px; background: var(--line-soft); }
+  .reader .exit { position: fixed; top: 18px; right: 22px; color: var(--ink-dim); border: 1px solid var(--line); border-radius: var(--r); padding: 6px 14px; font-size: 12.5px; background: var(--surface); }
+  .reader .exit:hover { color: var(--ink); }
+
+  /* ── config ── */
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 18px 20px; margin-bottom: 14px; }
+  .form { display: grid; grid-template-columns: repeat(3, minmax(160px, 1fr)); gap: 12px; }
+  .form label { display: block; font-size: 12px; color: var(--ink-dim); }
+  .form input { display: block; width: 100%; margin-top: 5px; padding: 7px 10px; }
+  .btn {
+    background: var(--surface-2); border: 1px solid var(--ink-faint);
+    border-radius: var(--r); padding: 7px 16px; font-size: 13px; color: var(--ink);
+  }
+  .btn:hover { border-color: var(--d4); }
+  .btn.ghost { border-color: var(--line); color: var(--ink-dim); }
+  .btn.ghost:hover { color: var(--bad); border-color: var(--bad); }
+  .panel .ph { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; font-size: 13.5px; }
+  .panel .ph .copy { margin-left: auto; color: var(--ink-faint); padding: 3px; }
+  .panel .ph .copy:hover { color: var(--ink); }
+  .alert {
+    display: flex; gap: 10px; align-items: baseline;
+    border: 1px solid rgba(196,85,61,.4); background: rgba(196,85,61,.08);
+    border-radius: var(--r); padding: 11px 14px; font-size: 13px; margin-bottom: 16px;
+  }
+  .alert .code { font-family: var(--mono); font-size: 12px; color: var(--ink-dim); background: var(--bg-deep); border-radius: 4px; padding: 1px 6px; }
+
+  /* ── empty / onboarding ── */
+  .empty-block { border: 1px dashed var(--line); border-radius: 8px; padding: 34px 28px; margin-top: 26px; }
+  .empty-block h3 { font: 500 19px var(--serif); margin: 0 0 4px; }
+  .empty-block p { color: var(--ink-dim); margin: 0 0 20px; }
+  .steps { display: grid; gap: 0; }
+  .step { display: flex; gap: 14px; padding: 11px 0; border-bottom: 1px solid var(--line-soft); align-items: baseline; }
+  .step:last-child { border-bottom: none; }
+  .step .no { font: 500 13px var(--serif); color: var(--d4); width: 44px; flex: none; }
+  .step .cmd { font-family: var(--mono); font-size: 12px; color: var(--ink-dim); }
+  .step .cmd b { color: var(--ink); font-weight: 400; }
+
+  /* ── toast ── */
+  #toasts { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 60; }
+  .toast {
+    background: var(--surface-2); border: 1px solid var(--line); border-left: 3px solid var(--ok);
+    border-radius: var(--r); padding: 10px 16px; font-size: 13px; max-width: 340px;
+    animation: toast-in .18s ease;
+  }
+  .toast.err { border-left-color: var(--bad); }
+  @keyframes toast-in { from { transform: translateY(6px); opacity: 0; } }
+
+  /* ── skeletons ── */
+  .skel { background: var(--surface); border-radius: 4px; height: 14px; margin: 10px 0; }
+  .skel.w60 { width: 60%; } .skel.w40 { width: 40%; } .skel.w80 { width: 80%; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+  @media (max-width: 900px) {
+    .app { grid-template-columns: 1fr; }
+    aside { position: static; height: auto; flex-direction: row; align-items: center; gap: 4px; padding: 10px 14px; overflow-x: auto; }
+    .wordmark { padding: 0 12px 0 0; border-right: 1px solid var(--line); }
+    .wordmark .s, .side-foot { display: none; }
+    nav { flex-direction: row; padding: 0; }
+    nav a .count { display: none; }
+    main { padding: 22px 18px 50px; }
+    .tiles { grid-template-columns: repeat(2, 1fr); }
+    .cols { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div class="wordmark">
+      <div class="t">research-agent</div>
+      <div class="s">local research desk</div>
+    </div>
+    <nav id="nav"></nav>
+    <div class="side-foot">
+      <div class="row" title="database path"><span class="dot ok"></span><span class="mono" id="foot-db" style="overflow:hidden;text-overflow:ellipsis"></span></div>
+      <div class="row" id="foot-llm"><span class="dot dim2"></span><span>LLM not configured</span></div>
+    </div>
+  </aside>
+  <main id="main"><div class="skel w40"></div><div class="skel w80"></div><div class="skel w60"></div></main>
+</div>
+
+<div class="overlay" id="overlay"></div>
+<div class="drawer" id="drawer" role="dialog" aria-label="Paper detail"></div>
+<div class="reader" id="reader" role="dialog" aria-label="Report"></div>
+<div id="toasts"></div>
+
+<script>
+"use strict";
+
+/* ───────────────────────── helpers ───────────────────────── */
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
+  ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const safeUrl = u => /^https?:\/\//i.test(u || "") ? esc(u) : null;
+const nfmt = n => (n ?? 0).toLocaleString("en-US");
+const pct = f => (100 * (f || 0)).toFixed(0);
+const day = iso => (iso || "").slice(0, 10);
+const clock = iso => (iso || "").slice(11, 16);
+const title_ = s => s.replace(/\b\w/g, c => c.toUpperCase());
+
+const DEPTHS = ["discovered","abstract_read","skimmed","read","deep_read"];
+const READS = ["unread","queued","in_progress","completed","abandoned"];
+const DEPTH_LABEL = {discovered:"Discovered","abstract_read":"Abstract read",skimmed:"Skimmed",read:"Read","deep_read":"Deep read"};
+const READ_LABEL = {unread:"Unread",queued:"Queued","in_progress":"In progress",completed:"Completed",abandoned:"Abandoned"};
+/* sequential amber ramp, one per depth stage */
+const DEPTH_COLOR = ["#52400F","#7A5E14","#A67D1B","#D09E24","#F0BE3A"];
+/* categorical, fixed order: papers stream, gaps stream, reports stream */
+const STREAM_COLOR = { papers:"#3B84BC", gaps:"#B87F10", reports:"#A05ECF" };
+const GAP_COLOR = { missing_literature:"#3B84BC", unanswered_question:"#B87F10", methodology_gap:"#A05ECF", connection_gap:"#2FA455" };
+
+const ICON = {
+  overview:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M2 8.5 8 3l6 5.5"/><path d="M3.5 8v5h9V8"/></svg>',
+  papers:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M3 2.5h7.5L13 5v8.5H3z"/><path d="M5.5 6.5h5M5.5 9h5M5.5 11.5h3"/></svg>',
+  pipeline:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M2 3h12M4 8h8M6.5 13h3"/></svg>',
+  history:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3.2l2.2 1.4"/></svg>',
+  results:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="2.2"/></svg>',
+  config:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="2"/><path d="M8 2v2M8 12v2M2 8h2M12 8h2M3.8 3.8l1.4 1.4M10.8 10.8l1.4 1.4M12.2 3.8l-1.4 1.4M5.2 10.8l-1.4 1.4"/></svg>',
+  search:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="7" cy="7" r="4.4"/><path d="m10.4 10.4 3 3"/></svg>',
+  x:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" width="14" height="14"><path d="m4 4 8 8M12 4l-8 8"/></svg>',
+  ext:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" width="11" height="11"><path d="M6 3h7v7M13 3 7 9"/><path d="M11 9v4H3V5h4"/></svg>',
+  copy:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" width="13" height="13"><rect x="5" y="5" width="8" height="8" rx="1.5"/><path d="M11 5V4a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 4v5.5A1.5 1.5 0 0 0 4 11h1"/></svg>',
+  warn:'<svg viewBox="0 0 16 16" fill="none" stroke="#C4553D" stroke-width="1.3" width="14" height="14"><path d="M8 2.5 14 13H2z"/><path d="M8 6.5v3M8 11.4v.2"/></svg>'
+};
+
+function toast(msg, isErr) {
+  const t = document.createElement("div");
+  t.className = "toast" + (isErr ? " err" : "");
+  t.textContent = msg;
+  $("toasts").appendChild(t);
+  setTimeout(() => t.remove(), 3400);
+}
+async function copyText(text, label) {
+  try { await navigator.clipboard.writeText(text); toast(label + " copied"); }
+  catch { toast("Copy failed — select it manually", true); }
+}
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.error || (path + " failed (" + r.status + ")"));
+  return body;
+}
+
+/* ───────────────────────── state & router ───────────────────────── */
+const state = {
+  papers: [], papersLoaded: false,
+  paperFilter: "all", paperSort: "recent", query: "",
+  historyFilter: "all",
+};
+
+const ROUTES = ["overview","papers","pipeline","history","results","config"];
+function route() {
+  const h = location.hash.replace(/^#\/?/, "");
+  const [name, rest] = h.split("/");
+  const page = ROUTES.includes(name) ? name : "overview";
+  return { page, arg: rest || null };
+}
+window.addEventListener("hashchange", render);
+
+/* ───────────────────────── shell ───────────────────────── */
+function drawNav(counts) {
+  const items = [
+    ["overview","Overview", ICON.overview, null],
+    ["papers","Papers", ICON.papers, counts.papers],
+    ["pipeline","Pipeline", ICON.pipeline, null],
+    ["history","History", ICON.history, null],
+    ["results","Results", ICON.results, counts.gaps],
+    ["config","Config", ICON.config, null],
+  ];
+  const cur = route().page;
+  $("nav").innerHTML = items.map(([id, label, icon, n]) =>
+    '<a href="#/' + id + '"' + (cur === id ? ' aria-current="page"' : "") + ">" +
+    icon + "<span>" + label + "</span>" +
+    (n != null ? '<span class="count">' + nfmt(n) + "</span>" : "") + "</a>"
+  ).join("");
+}
+async function loadChrome() {
+  try {
+    const [ov, cf] = await Promise.all([api("/api/overview"), api("/api/config")]);
+    $("foot-db").textContent = ov.db_path.split("/").slice(-1)[0] || ov.db_path;
+    $("foot-db").title = ov.db_path;
+    const llmRow = $("foot-llm");
+    if (cf.llm) {
+      llmRow.innerHTML = '<span class="dot ' + (cf.llm.api_key_set ? "ok" : "bad") + '"></span>' +
+        "<span>" + esc(cf.llm.provider) + " / " + esc(cf.llm.model) + "</span>";
+      llmRow.title = "API key env: " + cf.llm.api_key_env + (cf.llm.api_key_set ? " (set)" : " (missing)");
+    }
+    return { ov, cf };
+  } catch { return null; }
+}
+
+/* ───────────────────────── shared renderers ───────────────────────── */
+function funnel(target, stages, counts, colors, labels) {
+  const max = Math.max(1, ...stages.map(s => counts[s] || 0));
+  const total = stages.reduce((a, s) => a + (counts[s] || 0), 0);
+  let html = "";
+  stages.forEach((s, i) => {
+    const n = counts[s] || 0;
+    const w = Math.round(100 * n / max);
+    const share = total ? Math.round(100 * n / total) : 0;
+    html += '<div class="funnel-row">' +
+      '<div class="name">' + esc(labels[s]) + "</div>" +
+      '<div class="bar"><i style="width:' + w + "%;background:" + colors[i] + '"></i></div>' +
+      '<div class="val"><b>' + nfmt(n) + "</b> (" + share + "%)</div></div>";
+    if (i < stages.length - 1 && n > 0) {
+      const next = counts[stages[i + 1]] || 0;
+      const conv = Math.round(100 * next / n);
+      html += '<div class="conv">' + conv + "% advance to " + esc(labels[stages[i + 1]].toLowerCase()) + "</div>";
+    }
+  });
+  $(target).innerHTML = html;
+}
+
+function ring(p, radius, frac, cls) {
+  const c = 2 * Math.PI * radius;
+  const off = c * (1 - (frac || 0));
+  return '<svg class="ring ' + (cls || "") + '" width="' + (radius * 2 + 6) + '" height="' + (radius * 2 + 6) + '">' +
+    '<circle class="track" cx="' + (radius + 3) + '" cy="' + (radius + 3) + '" r="' + radius + '" fill="none" stroke-width="4"/>' +
+    '<circle class="fill" cx="' + (radius + 3) + '" cy="' + (radius + 3) + '" r="' + radius + '" fill="none" stroke-width="4" ' +
+    'stroke-dasharray="' + c.toFixed(1) + '" stroke-dashoffset="' + off.toFixed(1) + '"/></svg>';
+}
+
+function dmark(stage) {
+  const idx = DEPTHS.indexOf(stage);
+  return '<span class="dmark" title="Depth: ' + esc(DEPTH_LABEL[stage]) + '">' +
+    DEPTHS.map((_, i) => "<i" + (i <= idx ? ' class="f' + (idx + 1) + '"' : "") + "></i>").join("") + "</span>";
+}
+
+function stars(paper) {
+  const r = paper.rating || 0;
+  return '<span class="stars" data-id="' + esc(paper.id) + '">' +
+    [1,2,3,4,5].map(i => '<button data-star="' + i + '" aria-label="Rate ' + i + '"' +
+      (i <= r ? ' class="on"' : "") + ">★</button>").join("") + "</span>";
+}
+
+function statusSelect(paper) {
+  return '<select class="stepper" data-id="' + esc(paper.id) + '" aria-label="Reading status">' +
+    READS.map(s => '<option value="' + s + '"' + (paper.reading_status === s ? " selected" : "") + ">" +
+      esc(READ_LABEL[s]) + "</option>").join("") + "</select>";
+}
+
+/* optimistic write with rollback */
+async function patchPaper(id, body, papers) {
+  const paper = papers.find(p => p.id === id);
+  const before = paper ? { reading_status: paper.reading_status, rating: paper.rating } : null;
+  if (paper) Object.assign(paper, body);
+  try {
+    const updated = await api("/api/papers/" + encodeURIComponent(id), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (paper) Object.assign(paper, updated);
+    return true;
+  } catch (e) {
+    if (paper && before) Object.assign(paper, before);
+    toast(e.message, true);
+    return false;
+  }
+}
+
+/* ───────────────────────── pages ───────────────────────── */
+const pages = {
+
+  overview: async () => {
+    const chrome = await loadChrome();
+    if (!chrome) throw new Error("server unreachable");
+    const { ov, cf } = chrome;
+    drawNav({ papers: ov.papers, gaps: ov.gaps });
+    const [pipe, res] = await Promise.all([api("/api/pipeline"), api("/api/results")]);
+
+    if (ov.papers === 0 && ov.topics === 0) { $("main").innerHTML = onboarding(cf); return; }
+
+    const readFrac = ov.papers ? ov.read / ov.papers : 0;
+    const ps = pipe.paper_status;
+    const deepRead = (ps.read || 0) + (ps.deep_read || 0);
+    const avgCov = res.topics.length
+      ? res.topics.reduce((a, t) => a + (t.state ? t.state.coverage_score : 0), 0) / res.topics.filter(t=>t.state).length || 0
+      : 0;
+    const highGaps = res.gaps.filter(g => (g.priority || 0) >= 0.7).length;
+    const latestRep = res.reports.slice().sort((a,b) => (b.generated_at||"").localeCompare(a.generated_at||""))[0];
+
+    const html = `
+      <div class="page-head"><h1>Overview</h1>
+        <span class="page-sub">${esc(ov.papers)} papers across ${esc(ov.topics)} topics</span></div>
+      <div class="tiles">
+        <div class="tile"><div class="n">${nfmt(ov.papers)}</div><div class="l">Papers</div>
+          <div class="x"><div class="depth-strip">${depthStrip(ps)}</div>
+          <div class="cap">${deepRead} read at depth</div></div></div>
+        <div class="tile"><div class="n">${nfmt(ov.read)}</div><div class="l">Completed</div>
+          <div class="x"><div class="microbar"><i style="width:${pct(readFrac)}%;background:var(--c-green)"></i></div>
+          <div class="cap">${pct(readFrac)}% of library · ${ov.queued} queued</div></div></div>
+        <div class="tile"><div class="n">${nfmt(ov.gaps)}</div><div class="l">Gaps</div>
+          <div class="x"><div class="microbar"><i style="width:${ov.gaps?pct(highGaps/ov.gaps):0}%;background:var(--c-amber)"></i></div>
+          <div class="cap">${highGaps} high priority</div></div></div>
+        <div class="tile"><div class="n">${nfmt(ov.reports)}</div><div class="l">Reports</div>
+          <div class="x"><div class="cap" style="margin-top:0">${latestRep ? esc(latestRep.title) + ", " + esc(day(latestRep.generated_at)) : "none yet"}</div></div></div>
+        <div class="tile"><div class="n">${res.topics.length ? pct(avgCov) + "%" : "—"}</div><div class="l">Avg coverage</div>
+          <div class="x"><div class="microbar"><i style="width:${pct(avgCov)}%;background:var(--d4)"></i></div>
+          <div class="cap">${res.topics.length} ${res.topics.length === 1 ? "topic" : "topics"} tracked</div></div></div>
+      </div>
+
+      <div class="cols" style="margin-top:30px">
+        <div>
+          <div class="section-h">Reading depth</div>
+          <div id="f-depth"></div>
+          <div class="section-h">Reading pipeline</div>
+          <div id="f-reading"></div>
+        </div>
+        <div>
+          <div class="section-h">Topic coverage</div>
+          <div id="ov-topics">${topicRows(res.topics, true)}</div>
+        </div>
+      </div>`;
+    $("main").innerHTML = html;
+    funnel("f-depth", DEPTHS, ps, DEPTH_COLOR, DEPTH_LABEL);
+    funnel("f-reading", READS.filter(s => s !== "abandoned"), pipe.reading_status,
+      ["#3a352c","#7d745f","#B7AD97","#2FA455"], READ_LABEL);
+    if (pipe.reading_status.abandoned) {
+      $("f-reading").innerHTML += '<div class="conv">' + nfmt(pipe.reading_status.abandoned) +
+        " abandoned along the way</div>";
+    }
+  },
+
+  papers: async (arg) => {
+    drawNav({});
+    if (!state.papersLoaded) {
+      $("main").innerHTML = '<div class="page-head"><h1>Papers</h1></div>' +
+        '<div class="toolbar"></div><div class="skel w80"></div><div class="skel w60"></div><div class="skel w80"></div>';
+    }
+    const data = await api("/api/papers");
+    state.papers = data.papers;
+    state.papersLoaded = true;
+    if (arg) { openDrawer(arg); }
+    drawPapersPage();
+  },
+
+  pipeline: async () => {
+    drawNav({});
+    $("main").innerHTML = '<div class="page-head"><h1>Pipeline</h1></div><div class="skel w60"></div>';
+    const pipe = await api("/api/pipeline");
+    const aband = pipe.reading_status.abandoned || 0;
+    $("main").innerHTML = `
+      <div class="page-head"><h1>Pipeline</h1>
+        <span class="page-sub">how papers move from discovery to deep reading</span></div>
+      <div class="cols">
+        <div>
+          <div class="section-h">Reading depth</div>
+          <div id="f-depth"></div>
+          <div class="section-h">Reading pipeline</div>
+          <div id="f-reading"></div>
+          <div class="conv">${nfmt(aband)} abandoned along the way</div>
+        </div>
+        <div>
+          <div class="section-h">Stage detail</div>
+          ${stageTable("Depth", DEPTHS, pipe.paper_status, DEPTH_LABEL)}
+          ${stageTable("Reading", READS, pipe.reading_status, READ_LABEL)}
+        </div>
+      </div>`;
+    funnel("f-depth", DEPTHS, pipe.paper_status, DEPTH_COLOR, DEPTH_LABEL);
+    funnel("f-reading", READS.filter(s => s !== "abandoned"), pipe.reading_status,
+      ["#3a352c","#7d745f","#B7AD97","#2FA455"], READ_LABEL);
+  },
+
+  history: async () => {
+    drawNav({});
+    $("main").innerHTML = '<div class="page-head"><h1>History</h1></div><div class="skel w60"></div>';
+    const h = await api("/api/history");
+    const streams = [
+      ["papers", h.papers_added, "paper added"],
+      ["gaps", h.gaps_found, "gap found"],
+      ["reports", h.reports_generated, "report generated"],
+    ];
+    const evs = [];
+    streams.forEach(([key, items, label]) => {
+      items.forEach(it => evs.push({ date: it.date, key, label, it }));
+    });
+    evs.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+    const shown = evs.filter(e => state.historyFilter === "all" || e.key === state.historyFilter);
+    const byDay = new Map();
+    shown.forEach(e => {
+      const d = day(e.date) || "unknown";
+      if (!byDay.has(d)) byDay.set(d, []);
+      byDay.get(d).push(e);
+    });
+    const countFor = key => evs.filter(e => e.key === key).length;
+    $("main").innerHTML = `
+      <div class="page-head"><h1>History</h1>
+        <span class="page-sub">${nfmt(evs.length)} events</span></div>
+      <div class="toolbar"><div class="chips">
+        <button class="chip ${state.historyFilter==="all"?"on":""}" data-hf="all">All <span class="cn">${evs.length}</span></button>
+        ${["papers","gaps","reports"].map(k =>
+          '<button class="chip '+(state.historyFilter===k?"on":"")+'" data-hf="'+k+'">'+
+          title_(k)+' <span class="cn">'+countFor(k)+'</span></button>').join("")}
+      </div></div>
+      ${shown.length ? [...byDay.entries()].map(([d, list]) =>
+        '<div class="day"><span class="d">' + esc(d) + '</span><span class="n">' + list.length + "</span></div>" +
+        list.map(e => eventRow(e)).join("")
+      ).join("") : '<div class="empty-block"><h3>No activity yet</h3><p>Ingest papers and run analysis to build a history.</p></div>'}`;
+    $("main").querySelectorAll("[data-hf]").forEach(b =>
+      b.addEventListener("click", () => { state.historyFilter = b.dataset.hf; render(); }));
+  },
+
+  results: async () => {
+    drawNav({});
+    $("main").innerHTML = '<div class="page-head"><h1>Results</h1></div><div class="skel w60"></div>';
+    const r = await api("/api/results");
+    const gaps = r.gaps.slice().sort((a,b) => (b.priority||0)-(a.priority||0));
+    const reps = r.reports.slice().sort((a,b) => (b.generated_at||"").localeCompare(a.generated_at||""));
+    $("main").innerHTML = `
+      <div class="page-head"><h1>Results</h1>
+        <span class="page-sub">${nfmt(r.gaps.length)} gaps · ${nfmt(r.reports.length)} reports</span></div>
+      <div class="section-h" style="margin-top:24px">Topics</div>
+      ${r.topics.length ? topicRows(r.topics, false) : nothing("No topics yet — create one from the command line.")}
+      <div class="section-h">Knowledge gaps</div>
+      ${gaps.length ? `<table><thead><tr><th style="width:130px">Priority</th><th>Description</th><th style="width:190px">Type</th><th style="width:100px">Found</th></tr></thead><tbody>
+        ${gaps.map(g => '<tr><td><div class="rbar" style="width:100px"><i style="width:'+pct(g.priority)+'%;background:var(--c-amber)"></i></div><span class="faint mono">'+(g.priority||0).toFixed(2)+"</span></td>" +
+          "<td>" + esc(g.description) + "</td>" +
+          '<td><span class="gtype"><span class="sw" style="background:'+(GAP_COLOR[g.gap_type]||"var(--ink-faint)")+'"></span>'+esc(title_((g.gap_type||"").replace(/_/g," ")))+"</span></td>" +
+          "<td>" + esc(day(g.discovered_at)) + "</td></tr>").join("")}
+      </tbody></table>` : nothing("No gaps recorded — run gap analysis on a topic.")}
+      <div class="section-h">Reports</div>
+      ${reps.length ? reps.map((rep, i) =>
+        '<div class="rep-row"><span class="rt" data-rep="' + i + '">' + esc(rep.title) + "</span>" +
+        '<span class="rm">' + rep.sections.length + " sections · " + esc(day(rep.generated_at)) + "</span>" +
+        '<button class="readbtn" data-rep="' + i + '">Read</button></div>').join("")
+        : nothing("No reports yet — generate one for a topic.")}`;
+    $("main").querySelectorAll("[data-rep]").forEach(el =>
+      el.addEventListener("click", () => openReader(reps[+el.dataset.rep])));
+  },
+
+  config: async () => {
+    drawNav({});
+    loadChrome();
+    const cf = await api("/api/config");
+    const llm = cf.llm;
+    const dash = cf.dashboard;
+    const keyStatus = llm
+      ? '<span class="dot ' + (llm.api_key_set ? "ok" : "bad") + '" style="display:inline-block;margin-right:7px"></span>' +
+        (llm.api_key_set ? "key resolved" : "key missing from environment")
+      : '<span class="dot dim2" style="display:inline-block;margin-right:7px"></span>not configured';
+    $("main").innerHTML = `
+      <div class="page-head"><h1>Config</h1>
+        <span class="page-sub">workspace settings — saved to <span class="mono">~/.research/config.toml</span></span></div>
+      ${llm && !llm.api_key_set ? '<div class="alert">' + ICON.warn + "<div><b>" + esc(llm.api_key_env) + "</b> is not set in this shell. Export it, then restart the dashboard so the CLI tools pick it up too.</div></div>" : ""}
+      <div class="panel">
+        <div class="ph"><span style="margin-right:6px">LLM</span>${keyStatus}</div>
+        <p class="dim" style="margin:2px 0 14px;font-size:13px">Used by gap analysis and report generation. The key itself stays in your environment — only its name is stored.</p>
+        <div class="form">
+          <label>Provider<input id="cfg-provider" placeholder="anthropic" value="${llm ? esc(llm.provider) : ""}"></label>
+          <label>Model<input id="cfg-model" list="cfg-model-list" placeholder="claude-sonnet-4-6" value="${llm ? esc(llm.model) : ""}">
+            <datalist id="cfg-model-list"></datalist></label>
+          <label>API key env<input id="cfg-env" class="mono" placeholder="ANTHROPIC_API_KEY" value="${llm ? esc(llm.api_key_env) : ""}"></label>
+        </div>
+        <div class="form" style="grid-template-columns:1fr auto;align-items:end;margin-top:12px">
+          <label>Base URL <span class="faint">(OpenAI-compatible; blank = provider default)</span>
+            <input id="cfg-base" class="mono" placeholder="https://api.openai.com/v1" value="${llm && llm.base_url ? esc(llm.base_url) : ""}"></label>
+          <button class="btn ghost" id="cfg-load-models">Load model list</button>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:14px;align-items:center">
+          <button class="btn" id="cfg-save">Save LLM settings</button>
+          ${llm ? '<button class="btn ghost" id="cfg-remove">Remove</button>' : ""}
+          <span class="faint" style="font-size:12px" id="cfg-hint"></span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="ph">Workspace</div>
+        <p class="dim" style="margin:2px 0 14px;font-size:13px">Where the library database lives. Takes effect when the dashboard restarts.</p>
+        <div class="form" style="grid-template-columns:1fr">
+          <label>Database file<input id="ws-path" class="mono" placeholder="~/.research/research.db" value="${esc(cf.configured_database_path)}"></label>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="ph">Dashboard server</div>
+        <p class="dim" style="margin:2px 0 14px;font-size:13px">Serving on <span class="mono">${esc(location.host)}</span>. Exposing to the network requires the access token below; MCP is unaffected — it runs over stdio inside your agent process and never opens a port.</p>
+        <div class="form">
+          <label>Bind address<select id="srv-host">
+            <option value="127.0.0.1" ${dash.host === "127.0.0.1" ? "selected" : ""}>localhost only</option>
+            <option value="0.0.0.0" ${dash.host === "0.0.0.0" ? "selected" : ""}>0.0.0.0 — network (token required)</option>
+          </select></label>
+          <label>Port<input id="srv-port" type="number" min="1" max="65535" value="${dash.port}"></label>
+          <label>Access token${dash.token_set ? "" : ' <span class="faint">(generated on network bind)</span>'}
+            ${dash.token_set
+              ? '<div style="display:flex;gap:6px"><input id="srv-token" class="mono" readonly value="' + esc(dash.token) + '"><button class="btn ghost" id="srv-copy-token" title="Copy token">' + ICON.copy + '</button></div>'
+              : '<input id="srv-token" class="mono" placeholder="(none — localhost only)" readonly>'}
+          </label>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:14px;align-items:center">
+          <button class="btn" id="srv-save">Save settings</button>
+          <button class="btn" id="srv-restart">Save &amp; restart dashboard</button>
+          <span class="faint" style="font-size:12px" id="srv-hint"></span>
+        </div>
+      </div>`;
+    $("main").querySelectorAll("[data-copy]").forEach(b =>
+      b.addEventListener("click", () => copyText(b.dataset.copy, "Path")));
+
+    const readLlm = () => {
+      const provider = $("cfg-provider").value.trim();
+      const model = $("cfg-model").value.trim();
+      const env = $("cfg-env").value.trim();
+      const base = $("cfg-base").value.trim();
+      if (!provider || !model || !env) { toast("Provider, model, and key name are all required", true); return null; }
+      return { provider, model, api_key_env: env, base_url: base || null };
+    };
+    const readDashboard = () => ({
+      host: $("srv-host").value,
+      port: +$("srv-port").value,
+      token: $("srv-token").value.trim() || null,
+    });
+    const saveLlm = async (llmValue, okMsg) => {
+      try {
+        await api("/api/config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ llm: llmValue }) });
+        toast(okMsg);
+        loadChrome();
+        return true;
+      } catch (e) { toast(e.message, true); return false; }
+    };
+    const saveServer = async () => {
+      const body = { workspace: { database_path: $("ws-path").value.trim() }, dashboard: readDashboard() };
+      if (!body.workspace.database_path) { toast("Database path is required", true); return false; }
+      try {
+        await api("/api/config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        return true;
+      } catch (e) { toast(e.message, true); return false; }
+    };
+    $("cfg-save").addEventListener("click", () => {
+      const llmValue = readLlm();
+      if (llmValue) saveLlm(llmValue, "LLM settings saved");
+    });
+    const rmBtn = $("cfg-remove");
+    if (rmBtn) rmBtn.addEventListener("click", () => saveLlm(null, "LLM settings removed"));
+
+    $("cfg-load-models").addEventListener("click", async () => {
+      const hint = $("cfg-hint");
+      hint.textContent = "loading models…";
+      try {
+        const d = await api("/api/models");
+        const list = $("cfg-model-list");
+        list.innerHTML = d.models.map(m => "<option value=\"" + esc(m) + "\"></option>").join("");
+        hint.textContent = d.models.length + " models loaded";
+      } catch (e) { hint.textContent = ""; toast(e.message, true); }
+    });
+
+    const copyBtn = $("srv-copy-token");
+    if (copyBtn) copyBtn.addEventListener("click", () => copyText($("srv-token").value, "Token"));
+
+    $("srv-restart").addEventListener("click", async () => {
+      if (!(await saveServer())) return;
+      $("srv-hint").textContent = "restarting…";
+      try { await api("/api/restart", { method: "POST" }); } catch {}
+      // Poll until the fresh instance answers, then reload the app.
+      for (let i = 0; i < 40; i++) {
+        await new Promise(r => setTimeout(r, 500));
+        try { await fetch("/api/overview"); location.reload(); return; } catch {}
+      }
+      $("srv-hint").textContent = "";
+      toast("Dashboard did not come back — start it manually with `research dashboard`", true);
+    });
+  },
+};
+
+/* ───────────────────────── page pieces ───────────────────────── */
+function depthStrip(ps) {
+  const total = DEPTHS.reduce((a, s) => a + (ps[s] || 0), 0) || 1;
+  return DEPTHS.map((s, i) => {
+    const w = 100 * (ps[s] || 0) / total;
+    return "<i style=\"flex:0 0 " + Math.max(w, ps[s] ? 2 : 0) + "%;background:" + DEPTH_COLOR[i] + '"></i>';
+  }).join("");
+}
+
+function stageTable(title, stages, counts, labels) {
+  const total = stages.reduce((a, s) => a + (counts[s] || 0), 0);
+  return '<table style="margin-bottom:20px"><thead><tr><th colspan="2">' + title + " — " + total + "</th></tr></thead><tbody>" +
+    stages.map(s => "<tr><td class='dim' style='padding:6px 10px'>" + esc(labels[s]) +
+      "</td><td style='text-align:right;padding:6px 10px'>" + nfmt(counts[s] || 0) + "</td></tr>").join("") +
+    "</tbody></table>";
+}
+
+function topicRows(topics, compact) {
+  if (!topics.length) return "";
+  return topics.map(t => {
+    const st = t.state;
+    const cov = st ? st.coverage_score : 0;
+    return '<div class="topic-row"><span class="indent" style="--depth:' + (t.depth || 0) + '"></span>' +
+      '<div class="ringwrap">' + ring(null, 18, cov) + '<span class="pct">' + pct(cov) + "%</span></div>" +
+      '<div><div class="nm">' + esc(t.name) + "</div>" +
+      (compact ? "" : '<div class="pt-sub">' + (st ? nfmt(st.papers_read) + " read · " + nfmt(st.papers_queued) + " queued" : "no analysis yet") + "</div>") + "</div>" +
+      '<div class="meta">' + (st ? nfmt(st.gaps_identified) + " gaps" : "") + "</div></div>";
+  }).join("");
+}
+
+function eventRow(e) {
+  const c = STREAM_COLOR[e.key];
+  let main, trail = "";
+  if (e.key === "papers") {
+    main = '<a href="#/papers/' + esc(e.it.id) + '">' + esc(e.it.title) + "</a>";
+    trail = e.it.source || "";
+  } else if (e.key === "gaps") {
+    main = esc(e.it.description);
+    trail = e.it.topic_id ? "topic " + esc(e.it.topic_id.slice(0, 8)) : "";
+  } else {
+    main = '<a href="#/results">' + esc(e.it.title) + "</a>";
+  }
+  return '<div class="ev"><span class="tick">' + clock(e.date) + '</span>' +
+    '<span class="mark" style="background:' + c + '"></span><span>' + main + "</span>" +
+    (trail ? '<span class="trail">' + trail + "</span>" : "") + "</div>";
+}
+
+function nothing(msg) {
+  return '<div class="faint" style="padding:18px 2px;font-size:13px">' + esc(msg) + "</div>";
+}
+
+function onboarding(cf) {
+  return `
+    <div class="page-head"><h1>Welcome</h1><span class="page-sub">your workspace is empty — three commands to a first survey</span></div>
+    <div class="empty-block">
+      <h3>Start your library</h3>
+      <p>research-agent indexes papers, tracks what you've read, and finds what you've missed.</p>
+      <div class="steps">
+        <div class="step"><span class="no">01</span><div><div>Add a topic you care about</div>
+          <div class="cmd"><b>research topics add "your topic"</b></div></div></div>
+        <div class="step"><span class="no">02</span><div><div>Pull papers in from arXiv or Semantic Scholar</div>
+          <div class="cmd"><b>research ingest "search words" --topic &lt;topic-id&gt;</b></div></div></div>
+        <div class="step"><span class="no">03</span><div><div>Find your gaps, then generate a report</div>
+          <div class="cmd"><b>research gaps --topic &lt;topic-id&gt;</b> &nbsp;·&nbsp; <b>research report --topic &lt;topic-id&gt;</b></div></div></div>
+      </div>
+      <p class="faint" style="margin:18px 0 0;font-size:12px">This dashboard refreshes as the CLI works${cf && cf.llm ? "" : " — and once an LLM is configured, gap analysis and reports come alive"}.</p>
+    </div>`;
+}
+
+/* ───────────────────────── papers page ───────────────────────── */
+function drawPapersPage() {
+  $("main").innerHTML = `
+    <div class="page-head"><h1>Papers</h1><span class="page-sub" id="p-count"></span></div>
+    <div class="toolbar">
+      <div class="search">${ICON.search}<input id="q" placeholder="Search title, author, tag" value="${esc(state.query)}"><kbd>/</kbd></div>
+      <div class="chips" id="f-chips">
+        <button class="chip" data-f="all">All</button>
+        ${READS.map(s => '<button class="chip" data-f="' + s + '">' + esc(READ_LABEL[s]) + "</button>").join("")}
+      </div>
+      <select id="sort" style="margin-left:auto">
+        <option value="recent">Recently added</option>
+        <option value="relevance">Relevance</option>
+        <option value="rating">Rating</option>
+        <option value="title">Title</option>
+      </select>
+    </div>
+    <div id="p-table"></div>`;
+  const q = $("q");
+  q.addEventListener("input", () => { state.query = q.value; drawPaperTable(); });
+  q.addEventListener("keydown", e => { if (e.key === "Escape") { q.value = ""; state.query = ""; drawPaperTable(); } });
+  $("f-chips").querySelectorAll(".chip").forEach(b => {
+    if (b.dataset.f === state.paperFilter) b.classList.add("on");
+    b.addEventListener("click", () => {
+      state.paperFilter = b.dataset.f;
+      $("f-chips").querySelectorAll(".chip").forEach(x => x.classList.toggle("on", x.dataset.f === state.paperFilter));
+      drawPaperTable();
+    });
+  });
+  $("sort").value = state.paperSort;
+  $("sort").addEventListener("change", () => { state.paperSort = $("sort").value; drawPaperTable(); });
+  drawPaperTable();
+}
+
+function drawPaperTable() {
+  const q = state.query.trim().toLowerCase();
+  let list = state.papers.filter(p =>
+    (state.paperFilter === "all" || p.reading_status === state.paperFilter) &&
+    (!q || (p.title + " " + p.authors.join(" ") + " " + p.tags.join(" ") + " " + p.abstract_text).toLowerCase().includes(q)));
+  const by = {
+    recent: (a,b) => (b.created_at||"").localeCompare(a.created_at||""),
+    relevance: (a,b) => (b.relevance_score||0) - (a.relevance_score||0),
+    rating: (a,b) => (b.rating||0) - (a.rating||0),
+    title: (a,b) => a.title.localeCompare(b.title),
+  }[state.paperSort];
+  list = list.slice().sort(by);
+  $("p-count").textContent = nfmt(list.length) + " of " + nfmt(state.papers.length) + " shown";
+
+  $("p-table").innerHTML = list.length ? `
+    <table><thead><tr>
+      <th style="width:66px">Depth</th><th>Paper</th><th style="width:150px">Reading</th>
+      <th style="width:112px">Rating</th><th style="width:80px">Relevance</th></tr></thead>
+      <tbody>${list.map(p => paperRow(p)).join("")}</tbody></table>`
+    : '<div class="empty-block"><h3>Nothing matches</h3><p>Clear the search or pick another filter.</p></div>';
+
+  $("p-table").querySelectorAll("tr.rowlink").forEach(tr =>
+    tr.addEventListener("click", e => {
+      if (e.target.closest("select") || e.target.closest(".stars") || e.target.closest(".rowlink-ext")) return;
+      location.hash = "#/papers/" + tr.dataset.id;
+    }));
+  bindRowControls($("p-table"));
+}
+
+function paperRow(p) {
+  const u = safeUrl(p.url);
+  const snippet = p.abstract_text
+    ? '<div class="pt-abs">' + esc(p.abstract_text.slice(0, 160)) + (p.abstract_text.length > 160 ? "…" : "") + "</div>"
+    : "";
+  const link = u
+    ? ' <a class="rowlink-ext" href="' + u + '" target="_blank" rel="noreferrer" title="Open paper" aria-label="Open paper">' + ICON.ext + "</a>"
+    : "";
+  return '<tr class="rowlink" data-id="' + esc(p.id) + '">' +
+    "<td>" + dmark(p.status) + "</td>" +
+    '<td><div class="pt">' + esc(p.title) + link + "</div>" +
+      '<div class="pt-sub">' + esc(p.authors.slice(0, 2).join(", ")) + (p.authors.length > 2 ? " et al." : "") +
+      (p.year ? ", " + p.year : "") + "</div>" + snippet + "</td>" +
+    "<td>" + statusSelect(p) + "</td>" +
+    "<td>" + stars(p) + "</td>" +
+    '<td><div class="rbar"><i style="width:' + pct(p.relevance_score) + '%"></i></div></td></tr>';
+}
+
+/* rating clicks + status changes, shared by table and drawer */
+function bindRowControls(root) {
+  root.querySelectorAll(".stars").forEach(el => {
+    el.querySelectorAll("button").forEach(b => b.addEventListener("click", async () => {
+      const id = el.dataset.id, v = +b.dataset.star;
+      const paper = state.papers.find(p => p.id === id);
+      const next = (paper && paper.rating === v) ? null : v; // click same star clears
+      const ok = await patchPaper(id, { rating: next }, state.papers);
+      if (ok) {
+        el.querySelectorAll("button").forEach(x => x.classList.toggle("on", +x.dataset.star <= (next || 0)));
+        toast(next ? "Rated " + next + " of 5" : "Rating cleared");
+      }
+    }));
+  });
+  root.querySelectorAll(".stepper").forEach(el => el.addEventListener("change", async () => {
+    const ok = await patchPaper(el.dataset.id, { reading_status: el.value }, state.papers);
+    if (ok) toast("Moved to " + READ_LABEL[el.value].toLowerCase());
+  }));
+}
+
+/* ───────────────────────── drawer ───────────────────────── */
+function openDrawer(id) {
+  const p = state.papers.find(x => x.id === id);
+  if (!p) return;
+  const links = [];
+  const u = safeUrl(p.url);
+  if (u) links.push('<a href="' + u + '" target="_blank" rel="noreferrer">Publisher ' + ICON.ext + "</a>");
+  if (p.doi) links.push('<span class="mono">DOI ' + esc(p.doi) + "</span>");
+  if (p.arxiv_id) links.push('<span class="mono">arXiv ' + esc(p.arxiv_id) + "</span>");
+  if (p.pdf_path) links.push('<span class="mono">' + esc(p.pdf_path.split("/").pop()) + "</span>");
+  $("drawer").innerHTML =
+    '<button class="close" id="drawer-x" aria-label="Close">' + ICON.x + "</button>" +
+    '<div style="margin-bottom:10px">' + dmark(p.status) + "</div>" +
+    "<h2>" + esc(p.title) + "</h2>" +
+    '<div class="dim" style="font-size:13px">' + esc(p.authors.join(", ")) +
+      (p.year ? " · " + p.year : "") + (p.venue ? " · " + esc(p.venue) : "") + "</div>" +
+    (links.length ? '<div class="sec" style="margin-top:12px;padding-top:10px;display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px">' + links.join("") + "</div>" : "") +
+    (p.abstract_text ? '<div class="abstract">' + esc(p.abstract_text) + "</div>" : "") +
+    (p.pdf_path ? '<div class="sec"><button class="btn" id="drawer-read">Read paper</button></div>' : "") +
+    '<div class="sec"><div class="h">Reading progress</div>' +
+      '<div style="display:flex;gap:18px;align-items:center">' + statusSelect(p) + stars(p) + "</div></div>" +
+    (p.tags.length ? '<div class="sec"><div class="h">Tags</div>' + p.tags.map(t => '<span class="tag">' + esc(t) + "</span>").join("") + "</div>" : "") +
+    (p.notes ? '<div class="sec"><div class="h">Notes</div><div class="abstract" style="margin:0">' + esc(p.notes) + "</div></div>" : "") +
+    '<div class="sec"><table class="kv">' +
+      "<tr><td>Added</td><td>" + esc(day(p.created_at)) + "</td></tr>" +
+      "<tr><td>Updated</td><td>" + esc(day(p.updated_at)) + "</td></tr>" +
+      '<tr><td>ID</td><td class="mono">' + esc(p.id) + "</td></tr></table></div>";
+  $("drawer").classList.add("open");
+  $("overlay").classList.add("open");
+  $("drawer-x").focus();
+  bindRowControls($("drawer"));
+  $("drawer-read")?.addEventListener("click", () => openPaperReader(p.id));
+  $("drawer-x").addEventListener("click", closeDrawer);
+}
+
+function closeDrawer() {
+  $("drawer").classList.remove("open");
+  $("overlay").classList.remove("open");
+  if (route().page === "papers" && route().arg) {
+    history.replaceState(null, "", "#/papers");
+  }
+}
+$("overlay").addEventListener("click", closeDrawer);
+
+/* ───────────────────────── report reader ───────────────────────── */
+/* Stored bodies carry `<!-- page N -->` ingest anchors; escape everything,
+   then re-open safe spans where the markers were, so page breaks render as
+   separators instead of literal comment text. */
+function bodyHtml(body) {
+  return esc(body).replace(/&lt;!-- page (\d+) --&gt;/g,
+    '<span class="page-anchor">p. $1</span>');
+}
+
+async function openPaperReader(id) {
+  const p = state.papers.find(x => x.id === id);
+  if (!p) return;
+  const head =
+    '<button class="exit" id="reader-x">Close</button><div class="inner">' +
+    "<h1>" + esc(p.title) + "</h1>" +
+    '<div class="meta">' + esc(p.authors.slice(0, 3).join(", ")) + (p.year ? " · " + p.year : "") + "</div>";
+  $("reader").classList.add("open");
+  $("reader-x").addEventListener("click", () => $("reader").classList.remove("open"));
+  $("reader").scrollTop = 0;
+  if (p.pdf_path) {
+    // Native browser PDF viewer — same-origin, so the iframe is allowed.
+    $("reader").innerHTML = head +
+      '<iframe class="pdf" src="/api/papers/' + encodeURIComponent(id) + '/pdf"></iframe></div>';
+    return;
+  }
+  $("reader").innerHTML = head +
+    '<div class="body" id="paper-body"><span class="dim">Loading…</span></div></div>';
+  try {
+    const data = await api("/api/papers/" + encodeURIComponent(id) + "/body");
+    $("paper-body").innerHTML = bodyHtml(data.body);
+  } catch (e) {
+    $("paper-body").innerHTML = '<span class="dim">' + esc(e.message) + "</span>";
+  }
+}
+function openReader(rep) {
+  $("reader").innerHTML =
+    '<button class="exit" id="reader-x">Close</button><div class="inner">' +
+    "<h1>" + esc(rep.title) + "</h1>" +
+    '<div class="meta">' + esc(day(rep.generated_at)) + " · " + rep.sections.length + " sections" +
+      (rep.output_path ? " · " + esc(rep.output_path) : "") + "</div>" +
+    (rep.sections.length
+      ? rep.sections.map(s => "<h3>" + esc(s.heading) + '</h3><div class="body">' + esc(s.content) + "</div>").join("")
+      : '<div class="body dim">This report has no sections stored.</div>') +
+    "</div>";
+  $("reader").classList.add("open");
+  $("reader-x").addEventListener("click", () => $("reader").classList.remove("open"));
+  $("reader").scrollTop = 0;
+}
+
+/* ───────────────────────── keyboard ───────────────────────── */
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") {
+    if ($("reader").classList.contains("open")) { $("reader").classList.remove("open"); return; }
+    if ($("drawer").classList.contains("open")) { closeDrawer(); return; }
+  }
+  if (e.key === "/" && !e.target.closest("input, select, textarea")) {
+    if (route().page === "papers") { e.preventDefault(); $("q")?.focus(); }
+  }
+});
+
+/* ───────────────────────── boot ───────────────────────── */
+async function render() {
+  const { page, arg } = route();
+  closeDrawerSilent();
+  try {
+    await pages[page](arg);
+  } catch (e) {
+    $("main").innerHTML = '<div class="alert">' + ICON.warn +
+      "<div><b>Could not reach the dashboard API.</b> " + esc(e.message) + "</div></div>";
+  }
+}
+function closeDrawerSilent() {
+  $("drawer").classList.remove("open");
+  $("overlay").classList.remove("open");
+}
+render();
+loadChrome();
+</script>
+</body>
+</html>

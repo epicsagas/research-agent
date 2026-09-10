@@ -56,6 +56,55 @@ fn prepare_body(text: &str) -> Option<String> {
     Some(marked.chars().take(MAX_BODY_CHARS).collect())
 }
 
+/// The per-page extractor stops at the first page it cannot render and
+/// reports that as end-of-document, so a mid-document failure silently
+/// truncates the body. Compare against the document's own page count and say
+/// so rather than storing a short body as if it were complete.
+fn warn_truncated(bytes: &[u8], pages: &[String], label: &str) {
+    if let Some(expected) = load_page_count(bytes)
+        && expected > pages.len()
+    {
+        eprintln!(
+            "Warning: extracted {} of {expected} page(s) from {label}; the stored body is truncated.",
+            pages.len()
+        );
+    }
+}
+
+/// pdf-extract panics (internal assertion failures) on some content streams
+/// instead of returning Err — a single bad PDF must not kill ingest or
+/// reingest, so catch the unwind and report it as an ordinary source error.
+fn extract_pages(bytes: &[u8], label: &str) -> Result<Vec<String>> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        pdf_extract::extract_text_from_mem_by_pages(bytes)
+    })) {
+        Ok(Ok(pages)) => Ok(pages),
+        Ok(Err(e)) => Err(ResearchError::Source(format!(
+            "PDF text extraction failed for {label}: {e}"
+        ))),
+        Err(p) => {
+            let detail = p
+                .downcast_ref::<&str>()
+                .map(|s| (*s).to_string())
+                .or_else(|| p.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "unknown panic".into());
+            Err(ResearchError::Source(format!(
+                "PDF text extraction panicked for {label}: {detail}"
+            )))
+        }
+    }
+}
+
+/// Same guard for the metadata load behind the truncation warning.
+fn load_page_count(bytes: &[u8]) -> Option<usize> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        pdf_extract::Document::load_mem(bytes)
+            .ok()
+            .map(|d| d.get_pages().len())
+    }))
+    .unwrap_or(None)
+}
+
 impl PdfSource {
     pub fn new() -> Self {
         Self
@@ -83,32 +132,23 @@ impl PdfSource {
         )))
     }
 
+    /// Extract page-anchored body text from PDF bytes, without creating a
+    /// `Paper`. Used by the arXiv download path; `label` appears only in
+    /// warnings.
+    pub fn extract_body(&self, bytes: &[u8], label: &str) -> Result<Option<String>> {
+        let pages = extract_pages(bytes, label)?;
+        warn_truncated(bytes, &pages, label);
+        Ok(prepare_body(&join_pages(&pages)))
+    }
+
     pub fn ingest_file(&self, path: &Path) -> Result<(Paper, Option<String>)> {
         let bytes = std::fs::read(path)?;
 
         // Per-page extraction keeps page boundaries, which whole-document
         // extraction discards. Same engine underneath, so output is unchanged
         // apart from the markers.
-        let pages = pdf_extract::extract_text_from_mem_by_pages(&bytes).map_err(|e| {
-            ResearchError::Source(format!(
-                "PDF text extraction failed for {}: {e}",
-                path.display()
-            ))
-        })?;
-        // The per-page extractor stops at the first page it cannot render and
-        // reports that as end-of-document, so a mid-document failure silently
-        // truncates the body. Compare against the document's own page count
-        // and say so rather than storing a short body as if it were complete.
-        if let Ok(doc) = pdf_extract::Document::load_mem(&bytes) {
-            let expected = doc.get_pages().len();
-            if expected > pages.len() {
-                eprintln!(
-                    "Warning: extracted {} of {expected} page(s) from {}; the stored body is truncated.",
-                    pages.len(),
-                    path.display()
-                );
-            }
-        }
+        let pages = extract_pages(&bytes, &path.display().to_string())?;
+        warn_truncated(&bytes, &pages, &path.display().to_string());
         let text = join_pages(&pages);
 
         let title = path
@@ -214,5 +254,17 @@ mod tests {
     #[test]
     fn empty_page_list_yields_no_body() {
         assert!(prepare_body(&join_pages(&[])).is_none());
+    }
+
+    /// pdf-extract can panic on malformed content streams; whatever it does
+    /// with garbage bytes, extraction must return instead of killing the
+    /// process (regression net for the `catch_unwind` guards).
+    #[test]
+    fn garbage_pdf_yields_error_not_panic() {
+        let bytes = b"%PDF-1.4\ntrailer\n<< /Root 1 0 R >>\nstartxref\n0\n%%EOF";
+        match PdfSource::new().extract_body(bytes, "garbage") {
+            Ok(None) | Err(_) => {}
+            Ok(Some(body)) => assert!(!body.is_empty()),
+        }
     }
 }

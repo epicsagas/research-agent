@@ -162,6 +162,13 @@ enum Commands {
         body: bool,
     },
 
+    /// Start the local web dashboard (127.0.0.1, read-only)
+    Dashboard {
+        /// Port override (the config file's `[dashboard] port` otherwise)
+        #[arg(long)]
+        port: Option<u16>,
+    },
+
     /// Start the stdio MCP server (agent-driven mode; the primary interface for
     /// MCP hosts like Claude Code/Codex). Gated behind the `mcp` feature.
     #[cfg(feature = "mcp")]
@@ -234,7 +241,7 @@ async fn run() -> Result<()> {
             cited_by,
             intents,
         } => cmd_references(db, id, cited_by, intents).await?,
-        Commands::Reingest { missing_pages } => cmd_reingest(db, missing_pages)?,
+        Commands::Reingest { missing_pages } => cmd_reingest(db, missing_pages).await?,
         Commands::Gaps { topic } => cmd_gaps(db, topic).await?,
         Commands::Report { title, topic } => cmd_report(db, title, topic).await?,
         Commands::Topics { action } => cmd_topics(db, action)?,
@@ -246,6 +253,10 @@ async fn run() -> Result<()> {
             rating,
             body,
         } => cmd_read(db, id, status, rating, body)?,
+        Commands::Dashboard { port } => {
+            let config_path = default_config_path();
+            research_agent::dashboard::serve(cli.db.clone(), config_path, port).await?;
+        }
         #[cfg(feature = "mcp")]
         Commands::Mcp => cmd_serve(db).await?,
     }
@@ -402,6 +413,10 @@ async fn cmd_ingest(
             research_agent::application::ingest_pipeline::run_sources(&refs, &store, &q, limit)
                 .await,
         );
+    }
+
+    if !all_papers.is_empty() {
+        download_arxiv_bodies(&store, &all_papers, &pdf_download_dir(&db)).await?;
     }
 
     if let Some(topic_id) = &topic {
@@ -611,17 +626,90 @@ async fn cmd_references(db: PathBuf, id: String, cited_by: bool, intents: bool) 
     Ok(())
 }
 
+/// Where downloaded arXiv PDFs are cached: `pdf/` next to the database, so a
+/// workspace stays self-contained and `reingest` can re-extract from disk.
+fn pdf_download_dir(db: &std::path::Path) -> PathBuf {
+    db.parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join("pdf")
+}
+
+/// Download arXiv PDFs for papers that carry an `arxiv_id` but no stored
+/// body, extract their full text, and keep the PDF on disk. A failed download
+/// warns and moves on — a metadata-only library is the normal state, not an
+/// error. Papers that already have a body are skipped, so the call is
+/// idempotent.
+async fn download_arxiv_bodies(
+    store: &dyn IndexStore,
+    papers: &[research_agent::domain::paper::Paper],
+    pdf_dir: &std::path::Path,
+) -> Result<()> {
+    use research_agent::adapters::arxiv_source::ArxivSource;
+    use research_agent::adapters::pdf_source::PdfSource;
+
+    let src = ArxivSource::new();
+    let pdf = PdfSource::new();
+    let mut fetched = 0usize;
+
+    for paper in papers {
+        let Some(arxiv_id) = paper.arxiv_id.as_deref() else {
+            continue;
+        };
+        if store.get_paper_body(&paper.id)?.is_some() {
+            continue;
+        }
+        let bytes = match src.download_pdf(arxiv_id).await {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                eprintln!("Warning: PDF download failed for {arxiv_id}: {e}");
+                continue;
+            }
+        };
+        match pdf.extract_body(&bytes, arxiv_id) {
+            Ok(Some(body)) => {
+                std::fs::create_dir_all(pdf_dir)?;
+                let path = pdf_dir.join(format!("{arxiv_id}.pdf"));
+                std::fs::write(&path, &bytes)?;
+                store.set_paper_pdf_path(
+                    &paper.id,
+                    &path
+                        .canonicalize()
+                        .unwrap_or_else(|_| path.clone())
+                        .display()
+                        .to_string(),
+                )?;
+                store.set_paper_body(&paper.id, &body)?;
+                fetched += 1;
+                // arXiv asks automated fetches to space themselves out.
+                std::thread::sleep(std::time::Duration::from_secs(1));
+            }
+            Ok(None) => eprintln!("Warning: no text extracted from {arxiv_id}"),
+            Err(e) => eprintln!("Warning: {arxiv_id}: {e}"),
+        }
+    }
+    if fetched > 0 {
+        println!("Stored full text for {fetched} paper(s) from downloaded arXiv PDFs.");
+    }
+    Ok(())
+}
+
 /// Re-extract bodies for papers ingested from a local PDF. Idempotent:
 /// `set_paper_body` replaces, so a re-run costs time and nothing else.
-fn cmd_reingest(db: PathBuf, missing_pages: bool) -> Result<()> {
+/// Papers without a local PDF but with an arXiv id get their PDF downloaded
+/// and their body extracted for the first time.
+async fn cmd_reingest(db: PathBuf, missing_pages: bool) -> Result<()> {
     use research_agent::adapters::pdf_source::{PAGE_MARKER_PREFIX, PdfSource};
 
     let store = open_store(&db)?;
     let src = PdfSource::new();
+    let pdf_dir = pdf_download_dir(&db);
     let (mut done, mut skipped, mut failed) = (0usize, 0usize, 0usize);
 
     for paper in store.list_papers(None)? {
         let Some(pdf_path) = paper.pdf_path.as_deref() else {
+            if paper.arxiv_id.is_some() {
+                download_arxiv_bodies(&store, std::slice::from_ref(&paper), &pdf_dir).await?;
+            }
             continue;
         };
         if missing_pages {

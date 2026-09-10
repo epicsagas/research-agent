@@ -16,6 +16,28 @@ impl ArxivSource {
             client: reqwest::Client::new(),
         }
     }
+
+    /// Download a paper's PDF bytes from `https://arxiv.org/pdf/<id>`.
+    /// arXiv serves the versionless id at the latest version.
+    pub async fn download_pdf(&self, arxiv_id: &str) -> Result<Vec<u8>> {
+        let resp = self
+            .client
+            .get(format!("https://arxiv.org/pdf/{arxiv_id}"))
+            .send()
+            .await
+            .map_err(|e| ResearchError::Source(format!("arXiv PDF request failed: {e}")))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            return Err(ResearchError::Source(format!(
+                "arXiv PDF returned HTTP {status}"
+            )));
+        }
+        let bytes = resp
+            .bytes()
+            .await
+            .map_err(|e| ResearchError::Source(format!("arXiv PDF read failed: {e}")))?;
+        Ok(bytes.to_vec())
+    }
 }
 
 impl Default for ArxivSource {
