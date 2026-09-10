@@ -107,10 +107,13 @@ fn fixture() -> &'static Fixture {
                 store.set_paper_body(&paper.id, &body).expect("body");
             }
         }
-        let hybrid = HybridSearch::with_parts(
+        let mut hybrid = HybridSearch::with_parts(
             Box::new(HashEmbed),
             dir.path().join("bench-embeddings.idx"),
         );
+        // Populate the vector index once so the hybrid-query group measures
+        // RRF over a real 500-doc index, not an empty vector channel.
+        hybrid.rebuild(&store).expect("index rebuild");
         Fixture {
             _dir: dir,
             store,
