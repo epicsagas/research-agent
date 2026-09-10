@@ -49,21 +49,8 @@ impl ZoteroWrite {
         // The write path PATCHes item data to the configured host; a
         // non-loopback target would send library metadata off-machine, so
         // say so loudly rather than silently trusting the env.
-        let host = base_url
-            .split("://")
-            .nth(1)
-            .unwrap_or("")
-            .split('/')
-            .next()
-            .unwrap_or("")
-            .split(':')
-            .next()
-            .unwrap_or("");
-        if !host.is_empty()
-            && host != "localhost"
-            && !host.starts_with("127.")
-            && !host.starts_with("[::1]")
-        {
+        let host = host_of(&base_url);
+        if !host.is_empty() && host != "localhost" && !host.starts_with("127.") && host != "::1" {
             eprintln!(
                 "warning: ZOTERO_BASE_URL points at {host} — Zotero writes (and item data) will be sent there"
             );
@@ -335,6 +322,23 @@ pub fn tags_payload(tags: &[String]) -> serde_json::Value {
     json!({ "tags": tags.iter().map(|t| json!({ "tag": t })).collect::<Vec<_>>() })
 }
 
+/// The host (no port, no brackets) a base URL points at, for the loopback
+/// warning. Bracketed IPv6 is unwrapped before the port split, which a plain
+/// `split(':')` would mangle into `"["`.
+fn host_of(base_url: &str) -> &str {
+    let authority = base_url
+        .split("://")
+        .nth(1)
+        .unwrap_or("")
+        .split('/')
+        .next()
+        .unwrap_or("");
+    match authority.strip_prefix('[').and_then(|a| a.split(']').next()) {
+        Some(v6) => v6,
+        None => authority.split(':').next().unwrap_or(""),
+    }
+}
+
 /// Turn an HTTP status into an error naming the fix, mirroring the read
 /// source's 403 message.
 fn status_error(status: reqwest::StatusCode) -> ResearchError {
@@ -400,6 +404,16 @@ mod tests {
     fn base_url_gets_trailing_slash() {
         let w = ZoteroWrite::with_base_url("http://localhost:9999/api".into(), None);
         assert_eq!(w.base_url, "http://localhost:9999/api/");
+    }
+
+    #[test]
+    fn host_of_unwraps_ipv6_and_strips_port() {
+        assert_eq!(host_of("http://localhost:23119/api/"), "localhost");
+        assert_eq!(host_of("http://127.0.0.1:23119/api/"), "127.0.0.1");
+        assert_eq!(host_of("http://[::1]:23119/api/"), "::1");
+        assert_eq!(host_of("http://zotero.lan/api/"), "zotero.lan");
+        // No scheme: empty authority, which skips the warning entirely.
+        assert_eq!(host_of("not-a-url"), "");
     }
 
     #[test]

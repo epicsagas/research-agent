@@ -88,6 +88,9 @@ pub async fn export_tags_to_zotero(
     // item version is stale, so a second library paper with the same DOI
     // would turn into a spurious conflict.
     let mut written: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // DOIs whose item came back in conflict: retrying with the same stale
+    // version is a doomed write, so siblings on the same DOI skip directly.
+    let mut conflicted: std::collections::HashSet<String> = std::collections::HashSet::new();
     for paper in store.list_papers(None)? {
         // Stored DOIs are normalized at import; normalizing again is free and
         // keeps matching exact even for rows that predate that guarantee.
@@ -122,22 +125,27 @@ pub async fn export_tags_to_zotero(
             report.unchanged += 1;
             continue;
         }
+        // New-tag count measured against the trimmed tag set merge started
+        // from: item.tags may carry whitespace-only entries merge drops, so
+        // subtracting its length could underflow.
+        let added = merged.len() - current.len();
+        if conflicted.contains(&doi) {
+            report.skipped_conflict += 1;
+            continue;
+        }
         if !apply {
-            report.updates.push(format!(
-                "{}: +{} tag(s)",
-                paper.title,
-                merged.len() - item.tags.len()
-            ));
+            report
+                .updates
+                .push(format!("{}: +{added} tag(s)", paper.title));
             continue;
         }
         if sink.write_tags(&item.key, item.version, &merged).await? {
             written.insert(doi);
-            report.updates.push(format!(
-                "{}: +{} tag(s)",
-                paper.title,
-                merged.len() - item.tags.len()
-            ));
+            report
+                .updates
+                .push(format!("{}: +{added} tag(s)", paper.title));
         } else {
+            conflicted.insert(doi);
             report.skipped_conflict += 1;
         }
     }
@@ -329,5 +337,38 @@ mod tests {
         assert_eq!(report.skipped_ambiguous, 1);
         assert!(report.updates.is_empty());
         assert!(sink.writes.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn update_count_ignores_whitespace_only_item_tags() {
+        // The item's two whitespace-only tags are dropped by merge; counting
+        // against raw item.tags would underflow usize. New-tag count is 1.
+        let sink = FakeSink::new(vec![RemoteItem {
+            key: "K1".into(),
+            version: 7,
+            doi: Some("10.1/a".into()),
+            tags: vec![" ".into(), "  ".into()],
+        }]);
+        let report = run(vec![paper("P", "10.1/a", &["mine"])], &sink, true).await;
+        assert_eq!(report.updates, vec!["P: +1 tag(s)"]);
+    }
+
+    #[tokio::test]
+    async fn conflicting_item_is_not_retried_for_sibling_doi() {
+        // Both papers map to K1; the first write conflicts, so the second
+        // must skip without another doomed HTTP attempt.
+        let mut sink = FakeSink::new(vec![remote("K1", "10.1/a", &["old"])]);
+        sink.conflicts.push("K1".into());
+        let report = run(
+            vec![
+                paper("P1", "10.1/a", &["mine"]),
+                paper("P2", "10.1/a", &["mine"]),
+            ],
+            &sink,
+            true,
+        )
+        .await;
+        assert_eq!(report.skipped_conflict, 2);
+        assert_eq!(sink.writes.lock().unwrap().len(), 1);
     }
 }
