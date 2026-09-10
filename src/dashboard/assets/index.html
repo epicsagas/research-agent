@@ -334,6 +334,17 @@
     .tiles { grid-template-columns: repeat(2, 1fr); }
     .cols { grid-template-columns: 1fr; }
   }
+  /* sidebar GitHub badge */
+  .side-foot a.gh { display:flex; align-items:center; gap:8px; text-decoration:none; color:var(--ink-dim); }
+  .side-foot a.gh svg { width:14px; height:14px; flex:none; }
+  .side-foot a.gh:hover { color:var(--ink); }
+  /* manual page */
+  .manual pre { font:12px/1.6 var(--mono); background:var(--bg-deep); border:1px solid var(--line); border-radius:var(--r); padding:10px 12px; overflow-x:auto; margin:4px 0 10px; white-space:pre; }
+  .manual p { margin:2px 0 10px; color:var(--ink-dim); font-size:13px; }
+  .manual ul { margin:0 0 8px; padding-left:18px; color:var(--ink-dim); font-size:13px; }
+  .manual li { margin:3px 0; }
+  .manual b { color:var(--ink); }
+  .manual a { color:var(--d5); }
 </style>
 </head>
 <body>
@@ -347,6 +358,9 @@
     <div class="side-foot">
       <div class="row" title="database path"><span class="dot ok"></span><span class="mono" id="foot-db" style="overflow:hidden;text-overflow:ellipsis"></span></div>
       <div class="row" id="foot-llm"><span class="dot dim2"></span><span>LLM not configured</span></div>
+      <a class="row gh" href="https://github.com/epicsagas/research-agent" target="_blank" rel="noopener" title="Source on GitHub">
+        <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+        <span>GitHub</span></a>
     </div>
   </aside>
   <main id="main"><div class="skel w40"></div><div class="skel w80"></div><div class="skel w60"></div></main>
@@ -388,6 +402,7 @@ const ICON = {
   history:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3.2l2.2 1.4"/></svg>',
   results:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="2.2"/></svg>',
   config:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="2"/><path d="M8 2v2M8 12v2M2 8h2M12 8h2M3.8 3.8l1.4 1.4M10.8 10.8l1.4 1.4M12.2 3.8l-1.4 1.4M5.2 10.8l-1.4 1.4"/></svg>',
+  manual:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M2.5 3.5c2-1 4-1 5.5.5 1.5-1.5 3.5-1.5 5.5-.5v9c-2-1-4-1-5.5.5-1.5-1.5-3.5-1.5-5.5-.5z"/><path d="M8 4v9"/></svg>',
   search:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="7" cy="7" r="4.4"/><path d="m10.4 10.4 3 3"/></svg>',
   x:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" width="14" height="14"><path d="m4 4 8 8M12 4l-8 8"/></svg>',
   ext:'<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" width="11" height="11"><path d="M6 3h7v7M13 3 7 9"/><path d="M11 9v4H3V5h4"/></svg>',
@@ -420,7 +435,7 @@ const state = {
   historyFilter: "all",
 };
 
-const ROUTES = ["overview","papers","pipeline","history","results","config"];
+const ROUTES = ["overview","papers","pipeline","history","results","config","manual"];
 function route() {
   const h = location.hash.replace(/^#\/?/, "");
   const [name, rest] = h.split("/");
@@ -438,6 +453,7 @@ function drawNav(counts) {
     ["history","History", ICON.history, null],
     ["results","Results", ICON.results, counts.gaps],
     ["config","Config", ICON.config, null],
+    ["manual","Manual", ICON.manual, null],
   ];
   const cur = route().page;
   $("nav").innerHTML = items.map(([id, label, icon, n]) =>
@@ -671,6 +687,90 @@ const pages = {
       ).join("") : '<div class="empty-block"><h3>No activity yet</h3><p>Ingest papers and run analysis to build a history.</p></div>'}`;
     $("main").querySelectorAll("[data-hf]").forEach(b =>
       b.addEventListener("click", () => { state.historyFilter = b.dataset.hf; render(); }));
+  },
+
+  manual: async () => {
+    drawNav({});
+    loadChrome();
+    $("main").innerHTML = `
+      <div class="page-head"><h1>Manual</h1>
+        <span class="page-sub">driving research-agent from the terminal and from this desk</span></div>
+      <div class="cols manual" style="margin-top:24px">
+        <div>
+          <div class="panel">
+            <div class="ph">Quick start</div>
+            <p>One-time setup, then a loop of ingest, index, query.</p>
+            <pre>research init                        # workspace + config walkthrough
+research ingest "query"              # pull papers (default: all sources)
+research index                       # build / refresh the hybrid index
+research query "query" --evidence    # search metadata + full text</pre>
+            <p class="dim">Every step is safe to re-run: ingest skips duplicates, the index syncs incrementally.</p>
+          </div>
+          <div class="panel">
+            <div class="ph">Getting papers in</div>
+            <ul>
+              <li><b>Web sources</b> — <span class="mono">--source</span> accepts <span class="mono">arxiv</span>, <span class="mono">s2</span>, <span class="mono">openalex</span>, <span class="mono">europepmc</span>, <span class="mono">preprints</span>, or <span class="mono">all</span>. A failing source warns and the rest continue.</li>
+              <li><b>Local PDFs</b> — <span class="mono">research ingest --source pdf --path file-or-dir</span>. Bodies are extracted with page anchors, so search results can cite a page.</li>
+              <li><b>arXiv PDFs, automatic</b> — after ingest, papers with an arXiv id but no full text get their PDF downloaded to <span class="mono">pdf/</span> next to the database and indexed. Already-covered papers are skipped.</li>
+              <li><b>Zotero</b> — <span class="mono">--source zotero</span> reads a running local Zotero API.</li>
+              <li><b>BibTeX / CSL-JSON</b> — <span class="mono">research import file.bib</span> (a Zotero library export works).</li>
+              <li><b>Re-extract</b> — <span class="mono">research reingest --missing-pages</span> rebuilds bodies that predate page markers, downloading from arXiv when no local PDF exists.</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <div class="ph">Reading workflow</div>
+            <p>Track progress in the <b>Papers</b> table: the stepper sets reading status (unread through abandoned), the stars set a 1–5 rating. Also scriptable:</p>
+            <pre>research read &lt;id&gt; --status completed --rating 4
+research read &lt;id&gt; --body             # print stored full text</pre>
+          </div>
+          <div class="panel">
+            <div class="ph">Topics, gaps, reports</div>
+            <pre>research topics add "Topic name"
+research topics add "Sub" --parent &lt;topic-id&gt;
+research ingest "query" --topic &lt;topic-id&gt;
+research gaps --topic &lt;topic-id&gt;      # LLM knowledge-gap analysis
+research report --topic a,b --title "..."</pre>
+            <p class="dim">gaps and report need an <span class="mono">[llm]</span> section in the config; without one they return placeholders.</p>
+          </div>
+        </div>
+        <div>
+          <div class="panel">
+            <div class="ph">This dashboard</div>
+            <ul>
+              <li><b>Overview</b> — library size, reading depth, pipeline funnel, topic coverage.</li>
+              <li><b>Papers</b> — the library table; click a row for the drawer, open the built-in reader for page-anchored bodies or the stored PDF.</li>
+              <li><b>Pipeline</b> — where every paper sits from discovered to deep read.</li>
+              <li><b>History</b> — a reverse-chronological feed of everything that happened.</li>
+              <li><b>Results</b> — knowledge gaps and generated reports.</li>
+              <li><b>Config</b> — edit <span class="mono">[llm]</span>, workspace path, and dashboard bind settings. Binding off 127.0.0.1 requires a token.</li>
+            </ul>
+          </div>
+          <div class="panel">
+            <div class="ph">Search index</div>
+            <p>Hybrid search fuses lexical (FTS5) hits with local embedding hits. The index syncs incrementally on every ingest; changing the model forces one rebuild.</p>
+            <pre>research index --rebuild     # force a full rebuild</pre>
+            <p class="dim">If queries fall back to lexical-only, check <span class="mono">[search]</span> in the config — an unknown model name warns instead of failing silently.</p>
+          </div>
+          <div class="panel">
+            <div class="ph">Zotero write-back</div>
+            <pre>research export --to zotero --apply</pre>
+            <p class="dim">Dry-run by default; tags are matched by DOI. CLI-only by design.</p>
+          </div>
+          <div class="panel">
+            <div class="ph">Agent mode (MCP)</div>
+            <pre>research mcp</pre>
+            <p>Runs a stdio MCP server so hosts like Claude Code or Codex can drive the whole tool. Point the host at this binary and command.</p>
+          </div>
+          <div class="panel">
+            <div class="ph">Config file</div>
+            <p><span class="mono">~/.research/config.toml</span> — three sections: <span class="mono">[llm]</span> (provider, model, the key's <i>env var name</i>), <span class="mono">[search]</span> (provider local/openai, model, batch size), <span class="mono">[dashboard]</span> (host, port, token). Secrets are never written to the file.</p>
+          </div>
+          <div class="panel">
+            <div class="ph">Source</div>
+            <p>Open source at <a href="https://github.com/epicsagas/research-agent" target="_blank" rel="noopener">github.com/epicsagas/research-agent</a> — issues and stars welcome.</p>
+          </div>
+        </div>
+      </div>`;
   },
 
   results: async () => {
