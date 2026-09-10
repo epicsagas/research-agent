@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use research_agent::application::gap_analyzer::GapAnalyzer;
 use research_agent::application::ingest_pipeline::IngestPipeline;
 use research_agent::application::report_generator::ReportGenerator;
-use research_agent::composition::{make_llm_engine, open_store, resolve_db};
+use research_agent::composition::{load_config, make_llm_engine, open_store, resolve_db};
 use research_agent::config::{Config, default_config_path};
 use research_agent::domain::paper::{Rating, ReadingStatus};
 use research_agent::domain::research_topic::ResearchTopic;
@@ -177,12 +177,16 @@ enum Commands {
         /// Only papers linked to this topic
         #[arg(long)]
         topic: Option<String>,
-        /// Include papers that already have keywords (re-generate them)
+        /// Only papers that have no keywords yet. This is the default; the flag
+        /// exists so the intent can be stated explicitly in scripts.
         #[arg(long)]
+        missing: bool,
+        /// Include papers that already have keywords (re-generate them)
+        #[arg(long, conflicts_with = "missing")]
         force: bool,
-        /// Maximum papers to process
-        #[arg(long, default_value_t = 20)]
-        limit: usize,
+        /// Maximum papers to process (1..=1000)
+        #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u16).range(1..=1000))]
+        limit: u16,
     },
 
     /// Start the local web dashboard (127.0.0.1, read-only)
@@ -233,7 +237,7 @@ async fn main() {
     init_tracing();
     if let Err(e) = run().await {
         // Display, not the `Termination` Debug path: anyhow's Debug prints a
-        // captured backtrace (ONNX/ort symbols) at the user's terminal.
+        // captured backtrace at the user's terminal.
         eprintln!("Error: {e:#}");
         std::process::exit(1);
     }
@@ -280,9 +284,10 @@ async fn run() -> Result<()> {
             id,
             keywords,
             topic,
+            missing,
             force,
             limit,
-        } => cmd_enrich(db, id, keywords, topic, force, limit).await?,
+        } => cmd_enrich(db, id, keywords, topic, missing, force, limit).await?,
         Commands::Dashboard { port } => {
             let config_path = default_config_path();
             research_agent::dashboard::serve(cli.db.clone(), config_path, port).await?;
@@ -748,8 +753,9 @@ async fn cmd_enrich(
     id: Option<String>,
     keywords: Option<String>,
     topic: Option<String>,
+    _missing: bool,
     force: bool,
-    limit: usize,
+    limit: u16,
 ) -> Result<()> {
     let store = open_store(&db)?;
 
@@ -767,33 +773,40 @@ async fn cmd_enrich(
         anyhow::bail!("--keywords applies to a single paper: `research enrich <ID> --keywords ...`");
     }
 
-    let candidates: Vec<_> = match (&topic, force) {
-        (Some(tid), false) => store
-            .list_papers_by_topic(tid, Some(limit * 4))?
-            .into_iter()
-            .filter(|p| p.keywords.is_empty())
-            .take(limit)
-            .collect(),
-        (Some(tid), true) => store
-            .list_papers_by_topic(tid, Some(limit))?
-            .into_iter()
-            .collect(),
-        (None, false) => store.papers_missing_keywords(limit)?,
-        (None, true) => store.list_papers(Some(limit))?,
-    };
+    let limit = limit as usize;
+    let candidates = enrich_candidates(&store, topic.as_deref(), force, limit)?;
 
     if candidates.is_empty() {
-        println!("Nothing to enrich (every paper in scope already has keywords).");
+        // Say which of the two it is. "Everything is enriched" and "the scope is
+        // empty" look identical from here, and telling a user their topic is
+        // fully enriched when it simply has no papers sends them looking in the
+        // wrong place.
+        match (&topic, force) {
+            (Some(tid), _) if store.list_papers_by_topic(tid, Some(1))?.is_empty() => {
+                println!("Topic {tid} has no linked papers.");
+            }
+            (_, true) => println!("No papers in scope."),
+            _ => println!("Nothing to enrich — every paper in scope already has keywords."),
+        }
         return Ok(());
     }
 
-    let inner_store = open_store(&db)?;
-    let engine = make_llm_engine(inner_store)?;
-    let pairs = engine.extract_keywords(&candidates).await?;
+    // Decide the mode from the config, not from an empty result. An LLM that
+    // returns nothing usable is a different problem than having no LLM, and
+    // telling that user to configure a provider they already configured sends
+    // them to the wrong fix.
+    let has_llm = load_config().map(|c| c.llm.is_some()).unwrap_or(false);
+    let pairs = if has_llm {
+        let inner_store = open_store(&db)?;
+        let engine = make_llm_engine(inner_store)?;
+        engine.extract_keywords(&candidates).await?
+    } else {
+        vec![]
+    };
 
     // No [llm] configured: print the queue so the calling agent can generate
     // keywords itself and write them back. Not an error — this is mode B.
-    if pairs.is_empty() {
+    if !has_llm {
         println!("{} paper(s) need keywords:\n", candidates.len());
         for paper in &candidates {
             let abstract_snippet: String = paper.abstract_text.chars().take(200).collect();
@@ -807,9 +820,25 @@ async fn cmd_enrich(
         return Ok(());
     }
 
+    if pairs.is_empty() {
+        println!(
+            "The model returned no usable keywords for {} paper(s). Retry, or set them \
+             manually with `research enrich <ID> --keywords \"...\"`.",
+            candidates.len()
+        );
+        return Ok(());
+    }
+
     let mut written = 0usize;
     let mut failed = 0usize;
     for (paper_id, kws) in &pairs {
+        // A model can return an id it saw in an earlier batch. Only papers we
+        // actually asked about may be written.
+        if !candidates.iter().any(|p| p.id == *paper_id) {
+            eprintln!("Warning: ignoring keywords for {paper_id} — not in this batch");
+            failed += 1;
+            continue;
+        }
         match store.set_paper_keywords(paper_id, kws) {
             Ok(()) => written += 1,
             // A hallucinated id is the model's error, not a reason to abort the
@@ -824,7 +853,38 @@ async fn cmd_enrich(
     if failed > 0 {
         println!("{failed} paper(s) skipped (see warnings above).");
     }
+    if written + failed < candidates.len() {
+        println!(
+            "{} paper(s) went unanswered (batch token budget or a short response) — \
+             re-run to continue.",
+            candidates.len() - written - failed
+        );
+    }
     Ok(())
+}
+
+/// Pick the papers to enrich. Split out from `cmd_enrich` so the four
+/// (topic, force) combinations are testable without an LLM or a CLI parse.
+///
+/// `force` re-enriches papers that already have keywords, ordered oldest-update
+/// first so repeated runs walk through the set instead of re-processing the
+/// same relevance-ranked head every time.
+fn enrich_candidates(
+    store: &research_agent::adapters::sqlite_store::SqliteStore,
+    topic: Option<&str>,
+    force: bool,
+    limit: usize,
+) -> Result<Vec<research_agent::domain::paper::Paper>> {
+    let papers = match (topic, force) {
+        // Filtering in SQL, not in Rust: fetching a fixed window and filtering
+        // after it would report "nothing to enrich" whenever the window happens
+        // to be full of already-enriched papers.
+        (Some(tid), false) => store.papers_missing_keywords_by_topic(tid, limit)?,
+        (Some(tid), true) => store.papers_by_topic_stalest(tid, limit)?,
+        (None, false) => store.papers_missing_keywords(limit)?,
+        (None, true) => store.papers_stalest(limit)?,
+    };
+    Ok(papers)
 }
 
 async fn cmd_gaps(db: PathBuf, topic: Option<String>) -> Result<()> {

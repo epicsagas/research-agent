@@ -175,7 +175,17 @@ impl SqliteStore {
                 let raw: Option<i64> = row.get("rating")?;
                 raw.and_then(|n| u8::try_from(n).ok().and_then(|v| Rating::new(v).ok()))
             },
-            keywords: row.get("keywords").unwrap_or_default(),
+            // Defaulting here is load-bearing exactly once: `SELECT *` against a
+            // pre-v3 table has no `keywords` column, which is how a paper reads
+            // during the migration that adds it. After that the column is
+            // NOT NULL DEFAULT '', so a failure means a broken schema — but
+            // reporting it as "" would look like "needs enrichment" and loop
+            // forever, so it is worth not hiding.
+            keywords: match row.get("keywords") {
+                Ok(kw) => kw,
+                Err(rusqlite::Error::InvalidColumnName(_)) => String::new(),
+                Err(e) => return Err(e),
+            },
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
         })
@@ -353,6 +363,10 @@ impl IndexStore for SqliteStore {
             ResearchError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
         })?;
         let now = chrono::Utc::now().to_rfc3339();
+        // Bounded at the store so every writer is covered — the MCP tool is
+        // agent-reachable, and unbounded keywords would bloat the trigram index
+        // on every row. Keywords are a short list; 512 chars is generous.
+        let keywords: String = keywords.chars().take(512).collect();
         // The papers_au trigger reindexes the FTS row, so no explicit index
         // maintenance is needed here.
         let changed = conn.execute(
@@ -373,7 +387,61 @@ impl IndexStore for SqliteStore {
             "SELECT * FROM papers WHERE keywords = '' ORDER BY created_at DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map(params![limit as i64], Self::paper_from_row)?;
-        Ok(rows.filter_map(std::result::Result::ok).collect())
+        let mut papers = Vec::new();
+        for paper in rows {
+            papers.push(paper?);
+        }
+        Ok(papers)
+    }
+
+    fn papers_missing_keywords_by_topic(&self, topic_id: &str, limit: usize) -> Result<Vec<Paper>> {
+        let conn = self.conn.lock().map_err(|e| {
+            ResearchError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let mut stmt = conn.prepare(
+            "SELECT p.* FROM papers p
+             JOIN topic_papers tp ON tp.paper_id = p.id
+             WHERE tp.topic_id = ?1 AND p.keywords = ''
+             ORDER BY tp.relevance DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![topic_id, limit as i64], Self::paper_from_row)?;
+        let mut papers = Vec::new();
+        for paper in rows {
+            papers.push(paper?);
+        }
+        Ok(papers)
+    }
+
+    fn papers_stalest(&self, limit: usize) -> Result<Vec<Paper>> {
+        let conn = self.conn.lock().map_err(|e| {
+            ResearchError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let mut stmt =
+            conn.prepare("SELECT * FROM papers ORDER BY updated_at ASC LIMIT ?1")?;
+        let rows = stmt.query_map(params![limit as i64], Self::paper_from_row)?;
+        let mut papers = Vec::new();
+        for paper in rows {
+            papers.push(paper?);
+        }
+        Ok(papers)
+    }
+
+    fn papers_by_topic_stalest(&self, topic_id: &str, limit: usize) -> Result<Vec<Paper>> {
+        let conn = self.conn.lock().map_err(|e| {
+            ResearchError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
+        })?;
+        let mut stmt = conn.prepare(
+            "SELECT p.* FROM papers p
+             JOIN topic_papers tp ON tp.paper_id = p.id
+             WHERE tp.topic_id = ?1
+             ORDER BY p.updated_at ASC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![topic_id, limit as i64], Self::paper_from_row)?;
+        let mut papers = Vec::new();
+        for paper in rows {
+            papers.push(paper?);
+        }
+        Ok(papers)
     }
 
     fn update_paper_status(&self, id: &str, status: PaperStatus) -> Result<()> {
@@ -1451,6 +1519,60 @@ mod tests {
             .unwrap();
         let got = store.get_paper(&paper.id).unwrap().unwrap();
         assert_eq!(got.rating.map(Rating::get), Some(5));
+    }
+
+    #[test]
+    fn force_queue_advances_instead_of_repeating_its_head() {
+        // Regression: ordering the re-enrichment queue by topic relevance made
+        // every `--force` run return the same head, so repeated runs could
+        // never reach the rest of the library. Oldest-update-first means each
+        // pass moves the papers it touched to the back.
+        let store = test_store();
+        let mut ids = Vec::new();
+        for i in 0..5 {
+            let paper = Paper::new(format!("Paper {i}"));
+            store.insert_paper(&paper).unwrap();
+            ids.push(paper.id);
+        }
+
+        let first = store.papers_stalest(2).unwrap();
+        assert_eq!(first.len(), 2);
+        // Enriching bumps updated_at, which must push these to the back.
+        for paper in &first {
+            store.set_paper_keywords(&paper.id, "kw").unwrap();
+        }
+
+        let second = store.papers_stalest(2).unwrap();
+        for paper in &second {
+            assert!(
+                !first.iter().any(|p| p.id == paper.id),
+                "second batch repeated a paper from the first"
+            );
+        }
+    }
+
+    #[test]
+    fn topic_missing_keywords_filters_in_sql_not_in_a_window() {
+        // Regression: fetching a fixed window and filtering afterwards reported
+        // "nothing to enrich" whenever the window was full of enriched papers.
+        let store = test_store();
+        let topic = ResearchTopic::new("T".into());
+        store.insert_topic(&topic).unwrap();
+
+        // 10 enriched papers at high relevance, 1 unenriched at the tail.
+        for i in 0..10 {
+            let paper = Paper::new(format!("Enriched {i}"));
+            store.insert_paper(&paper).unwrap();
+            store.link_paper_to_topic(&paper.id, &topic.id, 0.9).unwrap();
+            store.set_paper_keywords(&paper.id, "already").unwrap();
+        }
+        let needy = Paper::new("Needs keywords".into());
+        store.insert_paper(&needy).unwrap();
+        store.link_paper_to_topic(&needy.id, &topic.id, 0.1).unwrap();
+
+        let got = store.papers_missing_keywords_by_topic(&topic.id, 2).unwrap();
+        assert_eq!(got.len(), 1, "the low-relevance unenriched paper must surface");
+        assert_eq!(got[0].id, needy.id);
     }
 
     #[test]

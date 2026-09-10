@@ -460,7 +460,9 @@ impl ResearchServer {
             Ok(s) => s,
             Err(e) => return err_result(e),
         };
-        let results = store.papers_missing_keywords(p.limit);
+        // Clamped: the param is client-supplied and each row carries a full
+        // abstract into the JSON response.
+        let results = store.papers_missing_keywords(p.limit.min(200));
         tool_result!(results)
     }
 

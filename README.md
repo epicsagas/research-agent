@@ -193,7 +193,7 @@ research --version
 | `research ingest [--source zotero] [query] [--topic <id>]` | Read papers from a running Zotero over its local API (`ZOTERO_BASE_URL` overrides default endpoint, needs "Allow other applications on this computer to communicate with Zotero" enabled); no query pulls the whole library. Not part of `--source all` — a personal library is not a discovery source |
 | `research ingest --source pdf --path <file\|dir> [--topic <id>]` | Ingest local PDF files (full body text is stored and searchable) |
 | `research import <file\|dir>` | Import BibTeX/BibLaTeX, CSL-JSON, or Zotero JSON files (desktop export or API shape), with abstracts, tags, and normalized DOIs; re-imports skip papers already in the library |
-| `research index [--rebuild]` | Build or rebuild search index (FTS + vector index) |
+| `research index [--rebuild]` | Rebuild the FTS search index |
 | `research reingest [--missing-pages]` | Re-extract stored PDF bodies (adds page markers to bodies ingested before they existed) |
 | `research query <q> [--evidence]` | Search papers (FTS5 full-text); `--evidence` also shows the matching body text with its section and page |
 | `research references <id> [--cited-by] [--intents]` | Fetch citation-graph edges from OpenAlex; `--cited-by` reverses the direction, `--intents` labels edges with Semantic Scholar citation intents |
