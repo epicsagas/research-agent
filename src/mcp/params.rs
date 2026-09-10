@@ -69,6 +69,20 @@ pub struct QueryPapersParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct MissingKeywordsParams {
+    /// Maximum papers to return (default 20).
+    #[serde(default = "default_query_limit")]
+    pub limit: usize,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct EnrichPaperParams {
+    pub id: String,
+    /// Keywords separated by "; ", e.g. "transformer; self-attention".
+    pub keywords: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct TopicBriefParams {
     /// Topic id to collect.
     pub topic: String,

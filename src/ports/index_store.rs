@@ -35,11 +35,6 @@ pub trait IndexStore: Send + Sync {
     /// a downloaded arXiv PDF), so `reingest` can re-extract without
     /// redownloading.
     fn set_paper_pdf_path(&self, paper_id: &str, path: &str) -> Result<()>;
-    /// (rowid, embeddable text) for every paper — the vector index corpus.
-    /// The rowid is the stable join key between the store and the vector file.
-    fn vector_corpus(&self) -> Result<Vec<(i64, String)>>;
-    /// Resolve a vector-index rowid back to its paper.
-    fn paper_by_rowid(&self, rowid: i64) -> Result<Option<Paper>>;
     /// Store the search-only keywords for a paper (LLM- or agent-generated).
     /// Overwrites any previous value; the FTS update trigger reindexes the row.
     fn set_paper_keywords(&self, id: &str, keywords: &str) -> Result<()>;

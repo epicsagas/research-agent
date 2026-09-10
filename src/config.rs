@@ -18,103 +18,6 @@ impl LlmConfig {
     }
 }
 
-/// Hybrid-search configuration. Absent section = local ONNX defaults.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SearchConfig {
-    /// "local" (bundled ONNX, default) or "openai" (remote, BYOK).
-    #[serde(default = "search_provider_default")]
-    pub provider: String,
-    /// Local model id (llm-kernel `EmbeddingModel`). Small by default so
-    /// low-VRAM machines and CPU-only hosts stay fast.
-    #[serde(default = "search_model_default")]
-    pub model: String,
-    /// Env var holding the OpenAI key when provider = "openai".
-    #[serde(default = "search_key_env_default")]
-    pub openai_api_key_env: String,
-    /// Papers per embedding call. Clamped to 8..=32 at runtime; `init`
-    /// records a core-count-based value here.
-    #[serde(default = "search_batch_default")]
-    pub embed_batch_size: usize,
-    /// Advisory embedding memory budget in MB (min(2 GB, 25% of RAM)),
-    /// recorded by `init`. Not consumed at runtime yet — sequential batched
-    /// embedding already bounds the arena — but it is the budget to honor
-    /// once concurrent embedding lands.
-    #[serde(default = "search_memory_budget_default")]
-    pub embed_memory_budget_mb: u32,
-}
-
-fn search_batch_default() -> usize {
-    16
-}
-
-fn search_memory_budget_default() -> u32 {
-    1024
-}
-
-impl SearchConfig {
-    /// Probe the machine (core count, total RAM) and return the embedding
-    /// caps `init` records into config: batch clamped from cores, memory
-    /// budget min(2 GB, 25% of RAM).
-    pub fn probed() -> Self {
-        let cores = std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(4);
-        Self {
-            embed_batch_size: (cores * 2).clamp(8, 32),
-            embed_memory_budget_mb: match total_ram_mb() {
-                Some(mb) => (mb / 4).clamp(256, 2048) as u32,
-                None => search_memory_budget_default(),
-            },
-            ..Self::default()
-        }
-    }
-}
-
-pub(crate) fn total_ram_mb() -> Option<u64> {
-    #[cfg(target_os = "macos")]
-    {
-        let out = std::process::Command::new("sysctl")
-            .args(["-n", "hw.memsize"])
-            .output()
-            .ok()?;
-        let bytes: u64 = std::str::from_utf8(&out.stdout).ok()?.trim().parse().ok()?;
-        Some(bytes / (1024 * 1024))
-    }
-    #[cfg(target_os = "linux")]
-    {
-        let raw = std::fs::read_to_string("/proc/meminfo").ok()?;
-        let line = raw.lines().find(|l| l.starts_with("MemTotal"))?;
-        let kb: u64 = line.split_whitespace().nth(1)?.parse().ok()?;
-        Some(kb / 1024)
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    {
-        None
-    }
-}
-
-fn search_provider_default() -> String {
-    "local".into()
-}
-fn search_model_default() -> String {
-    "BGESmallENV15".into()
-}
-fn search_key_env_default() -> String {
-    "OPENAI_API_KEY".into()
-}
-
-impl Default for SearchConfig {
-    fn default() -> Self {
-        Self {
-            provider: search_provider_default(),
-            model: search_model_default(),
-            openai_api_key_env: search_key_env_default(),
-            embed_batch_size: search_batch_default(),
-            embed_memory_budget_mb: search_memory_budget_default(),
-        }
-    }
-}
-
 /// `[dashboard]` section: how the web dashboard is served. Binding to a
 /// non-loopback host requires a token — without one every request would be
 /// readable (and writable) by the whole network.
@@ -150,10 +53,6 @@ pub struct Config {
     pub database_path: PathBuf,
     #[serde(default)]
     pub llm: Option<LlmConfig>,
-    /// Hybrid (lexical + vector) search config. Optional; missing section uses
-    /// local defaults.
-    #[serde(default)]
-    pub search: Option<SearchConfig>,
     #[serde(default)]
     pub dashboard: DashboardConfig,
 }
@@ -178,7 +77,6 @@ impl Default for Config {
         Self {
             database_path: default_db_path(),
             llm: None,
-            search: None,
             dashboard: DashboardConfig::default(),
         }
     }
@@ -213,7 +111,7 @@ fn toml_str(s: &str) -> String {
 }
 
 /// Render the config as a fully documented template: `database_path` is
-/// always live, and every key of the optional `[llm]` / `[search]` sections
+/// always live, and every key of the optional `[llm]` section
 /// appears — set values as live TOML, unset ones commented out with their
 /// defaults — so the file alone shows everything that is configurable.
 pub fn config_template(cfg: &Config) -> String {
@@ -246,44 +144,6 @@ pub fn config_template(cfg: &Config) -> String {
                 "# model = \"claude-sonnet-4-6\"",
                 "# api_key_env = \"ANTHROPIC_API_KEY\"  # env var holding the API key; the key itself is never stored here",
                 "# base_url = \"https://api.example.com/v1\"  # for OpenAI-compatible endpoints without a known default",
-            ] {
-                out.push_str(line);
-                out.push('\n');
-            }
-        }
-    }
-
-    out.push_str("\n# Hybrid search: FTS5 lexical hits fused with embedding hits. Missing\n");
-    out.push_str("# section = local ONNX defaults. The local model downloads to\n");
-    out.push_str("# ~/.research/models on first use.\n");
-    match &cfg.search {
-        Some(search) => {
-            out.push_str("[search]\n");
-            out.push_str("# \"local\" (bundled ONNX) or \"openai\" (BYOK remote embeddings)\n");
-            out.push_str(&format!("provider = {}\n", toml_str(&search.provider)));
-            out.push_str("# local model id (llm-kernel EmbeddingModel, e.g. BGESmallENV15)\n");
-            out.push_str(&format!("model = {}\n", toml_str(&search.model)));
-            out.push_str("# env var holding the OpenAI key when provider = \"openai\"\n");
-            out.push_str(&format!(
-                "openai_api_key_env = {}\n",
-                toml_str(&search.openai_api_key_env)
-            ));
-            out.push_str("# papers per embedding call (clamped to 8..=32; init records a core-count-based value)\n");
-            out.push_str(&format!("embed_batch_size = {}\n", search.embed_batch_size));
-            out.push_str("# advisory embedding memory budget in MB (min(2 GB, 25% of RAM))\n");
-            out.push_str(&format!(
-                "embed_memory_budget_mb = {}\n",
-                search.embed_memory_budget_mb
-            ));
-        }
-        None => {
-            for line in [
-                "# [search]",
-                "# provider = \"local\"  # \"local\" (bundled ONNX) or \"openai\" (BYOK remote embeddings)",
-                "# model = \"BGESmallENV15\"  # local model id (llm-kernel EmbeddingModel)",
-                "# openai_api_key_env = \"OPENAI_API_KEY\"  # env var holding the OpenAI key when provider = \"openai\"",
-                "# embed_batch_size = 16  # papers per embedding call (clamped to 8..=32)",
-                "# embed_memory_budget_mb = 1024  # advisory embedding memory budget in MB",
             ] {
                 out.push_str(line);
                 out.push('\n');
@@ -339,7 +199,6 @@ mod tests {
         let config = Config {
             database_path: PathBuf::from("/tmp/test.db"),
             llm: None,
-            search: None,
             dashboard: Default::default(),
         };
         config.save(&path).unwrap();
@@ -368,7 +227,6 @@ mod tests {
                 api_key_env: "ANTHROPIC_API_KEY".into(),
                 base_url: None,
             }),
-            search: None,
             dashboard: Default::default(),
         };
         config.save(&path).unwrap();
@@ -402,7 +260,6 @@ mod tests {
         let parsed: Config = toml::from_str(&text).unwrap();
         assert_eq!(parsed.database_path, default_db_path());
         assert!(parsed.llm.is_none());
-        assert!(parsed.search.is_none());
         // The template exists to document every configurable key, so unset
         // sections must still be visible as comments.
         for key in [
@@ -410,7 +267,6 @@ mod tests {
             "model",
             "api_key_env",
             "base_url",
-            "openai_api_key_env",
             "host",
             "port",
             "token",
@@ -432,10 +288,6 @@ mod tests {
                 api_key_env: "ANTHROPIC_API_KEY".into(),
                 base_url: None,
             }),
-            search: Some(SearchConfig {
-                provider: "openai".into(),
-                ..SearchConfig::default()
-            }),
             dashboard: Default::default(),
         };
         let text = config_template(&config);
@@ -443,12 +295,27 @@ mod tests {
         let llm = parsed.llm.unwrap();
         assert_eq!(llm.provider, "anthropic");
         assert_eq!(llm.api_key_env, "ANTHROPIC_API_KEY");
-        let search = parsed.search.unwrap();
-        assert_eq!(search.provider, "openai");
-        assert_eq!(search.model, "BGESmallENV15");
         // Values that are set render live, not as comments.
         assert!(text.contains("provider = \"anthropic\""));
-        assert!(text.contains("provider = \"openai\""));
+    }
+
+    #[test]
+    fn legacy_search_section_is_ignored_not_fatal() {
+        // Configs written before embeddings were removed still carry a
+        // [search] section. Parsing must skip it rather than fail — otherwise
+        // every existing install breaks on upgrade.
+        let text = r#"
+database_path = "/tmp/legacy.db"
+
+[search]
+provider = "local"
+model = "BGESmallENV15"
+openai_api_key_env = "OPENAI_API_KEY"
+embed_batch_size = 16
+embed_memory_budget_mb = 1024
+"#;
+        let parsed: Config = toml::from_str(text).unwrap();
+        assert_eq!(parsed.database_path, PathBuf::from("/tmp/legacy.db"));
     }
 
     #[test]

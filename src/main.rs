@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use research_agent::application::gap_analyzer::GapAnalyzer;
 use research_agent::application::ingest_pipeline::IngestPipeline;
 use research_agent::application::report_generator::ReportGenerator;
-use research_agent::composition::{load_config, make_llm_engine, open_store, resolve_db};
+use research_agent::composition::{make_llm_engine, open_store, resolve_db};
 use research_agent::config::{Config, default_config_path};
 use research_agent::domain::paper::{Rating, ReadingStatus};
 use research_agent::domain::research_topic::ResearchTopic;
@@ -306,11 +306,10 @@ fn cmd_init(db_path: PathBuf, no_onboard: bool) -> Result<()> {
             println!("Existing config kept: {}", config_path.display());
             println!("Re-run `research init` in a terminal to reconfigure interactively.");
         } else {
-            let mut config = Config {
+            let config = Config {
                 database_path: db_path,
                 ..Config::default()
             };
-            record_hardware_caps(&mut config);
             let db = config.database_path.clone();
             config.save(&config_path)?;
             open_store(&db)?;
@@ -325,13 +324,7 @@ fn cmd_init(db_path: PathBuf, no_onboard: bool) -> Result<()> {
         .exists()
         .then(|| research_agent::config::Config::load(&config_path))
         .transpose()?;
-    let fresh_config = existing.is_none();
-    let mut config = research_agent::onboard::run(db_path, existing)?;
-    // Hardware caps are only written for a fresh config — an existing one is
-    // never clobbered, including its recorded batch size.
-    if fresh_config {
-        record_hardware_caps(&mut config);
-    }
+    let config = research_agent::onboard::run(db_path, existing)?;
     config.save(&config_path)?;
     let store = open_store(&config.database_path)?;
     drop(store);
@@ -344,15 +337,6 @@ fn cmd_init(db_path: PathBuf, no_onboard: bool) -> Result<()> {
         );
     }
     Ok(())
-}
-
-/// Record hardware-derived embedding caps (batch size, memory budget) into
-/// the config's `[search]` section, creating it when absent.
-fn record_hardware_caps(config: &mut Config) {
-    let probed = research_agent::config::SearchConfig::probed();
-    let search = config.search.get_or_insert_with(Default::default);
-    search.embed_batch_size = probed.embed_batch_size;
-    search.embed_memory_budget_mb = probed.embed_memory_budget_mb;
 }
 
 async fn cmd_ingest(
@@ -461,16 +445,13 @@ async fn cmd_ingest(
         println!("Linked {} papers to topic {topic_id}", all_papers.len());
     }
 
-    if !all_papers.is_empty() {
-        // Embed now so the next query doesn't pay for it. Best-effort by the
-        // hybrid contract: failure here just means the next query falls back
-        // to lexical search and syncs then.
-        if open_hybrid(&store, &db).is_none() {
-            eprintln!("Warning: embedding index unavailable — queries fall back to lexical search");
-        }
-    }
-
     println!("Total: {} papers ingested", all_papers.len());
+    if !all_papers.is_empty() {
+        println!(
+            "Run `research enrich` to add search keywords (improves recall for \
+             queries worded differently from the abstract)."
+        );
+    }
     Ok(())
 }
 
@@ -503,10 +484,6 @@ fn cmd_index(db: PathBuf, rebuild: bool) -> Result<()> {
     let store = open_store(&db)?;
     if rebuild {
         store.rebuild_index()?;
-        let hybrid = open_hybrid(&store, &db);
-        if let Some(mut hybrid) = hybrid {
-            hybrid.rebuild(&store)?;
-        }
         println!("Index rebuilt.");
     } else {
         println!("Index is auto-maintained. Use --rebuild to force.");
@@ -514,26 +491,9 @@ fn cmd_index(db: PathBuf, rebuild: bool) -> Result<()> {
     Ok(())
 }
 
-/// Best-effort hybrid search stack: `None` (lexical-only fallback) when the
-/// embedding backend or index is unavailable. Never surfaces errors.
-fn open_hybrid(
-    store: &research_agent::adapters::sqlite_store::SqliteStore,
-    db_path: &std::path::Path,
-) -> Option<research_agent::application::hybrid_search::HybridSearch> {
-    let cfg = load_config().ok()?.search;
-    research_agent::application::hybrid_search::HybridSearch::open(
-        store,
-        cfg.as_ref(),
-        research_agent::application::hybrid_search::index_path_for(db_path),
-    )
-}
-
 fn cmd_query(db: PathBuf, query: String, limit: usize, evidence: bool) -> Result<()> {
     let store = open_store(&db)?;
-    let results = match open_hybrid(&store, &db) {
-        Some(hybrid) => hybrid.search(&store, &query, limit)?,
-        None => store.search_papers(&query, limit)?,
-    };
+    let results = store.search_papers(&query, limit)?;
 
     // Evidence is a separate pass over stored bodies: it answers "where in the
     // paper", which the ranked paper list cannot.
@@ -778,7 +738,7 @@ async fn cmd_reingest(db: PathBuf, missing_pages: bool) -> Result<()> {
 
     println!("Re-ingested {done} paper(s), skipped {skipped}, failed {failed}.");
     if done > 0 {
-        println!("Run `research index --rebuild` to re-embed the updated bodies.");
+        println!("Run `research index --rebuild` to reindex the updated bodies.");
     }
     Ok(())
 }

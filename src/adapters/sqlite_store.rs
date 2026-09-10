@@ -348,44 +348,6 @@ impl IndexStore for SqliteStore {
         Ok(())
     }
 
-    fn vector_corpus(&self) -> Result<Vec<(i64, String)>> {
-        let conn = self.conn.lock().map_err(|e| {
-            ResearchError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
-        let mut stmt = conn.prepare(
-            "SELECT p.rowid, p.title, p.abstract_text, pb.body
-             FROM papers p
-             LEFT JOIN paper_bodies pb ON pb.paper_id = p.id",
-        )?;
-        let rows = stmt.query_map([], |row| {
-            let title: String = row.get(1)?;
-            let abstract_text: String = row.get(2)?;
-            let body: Option<String> = row.get(3)?;
-            let text = match body {
-                Some(b) if !b.is_empty() => format!("{title}\n{abstract_text}\n{b}"),
-                _ => format!("{title}\n{abstract_text}"),
-            };
-            Ok((row.get::<_, i64>(0)?, text))
-        })?;
-        let mut corpus = Vec::new();
-        for row in rows {
-            corpus.push(row?);
-        }
-        Ok(corpus)
-    }
-
-    fn paper_by_rowid(&self, rowid: i64) -> Result<Option<Paper>> {
-        let conn = self.conn.lock().map_err(|e| {
-            ResearchError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
-        })?;
-        let mut stmt = conn.prepare("SELECT * FROM papers WHERE rowid = ?1")?;
-        let mut rows = stmt.query(params![rowid])?;
-        match rows.next()? {
-            Some(row) => Ok(Some(Self::paper_from_row(row)?)),
-            None => Ok(None),
-        }
-    }
-
     fn set_paper_keywords(&self, id: &str, keywords: &str) -> Result<()> {
         let conn = self.conn.lock().map_err(|e| {
             ResearchError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
