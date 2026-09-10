@@ -68,9 +68,13 @@ pub async fn export_tags_to_zotero(
     apply: bool,
 ) -> Result<ExportReport> {
     let remote = sink.library().await?;
-    let by_doi: std::collections::HashMap<&str, &RemoteItem> = remote
+    // Normalize both sides at match time, so the exporter never depends on
+    // the sink (or the import path) having normalized already.
+    let by_doi: std::collections::HashMap<String, &RemoteItem> = remote
         .iter()
-        .filter_map(|item| item.doi.as_deref().map(|doi| (doi, item)))
+        .filter_map(|item| {
+            item.doi.as_deref().and_then(normalize_doi).map(|doi| (doi, item))
+        })
         .collect();
 
     let mut report = ExportReport::default();
