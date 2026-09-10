@@ -64,7 +64,7 @@
   aside {
     background: var(--bg-deep); border-right: 1px solid var(--line);
     padding: 22px 0 18px; display: flex; flex-direction: column;
-    position: sticky; top: 0; height: 100vh;
+    position: sticky; top: 0; height: 100vh; z-index: 5;
   }
   .wordmark { padding: 0 22px 20px; }
   .wordmark .t { font: 600 17px/1.2 var(--serif); letter-spacing: .01em; }
@@ -235,15 +235,26 @@
   .overlay {
     position: fixed; inset: 0; background: rgba(10,8,5,.55);
     opacity: 0; pointer-events: none; visibility: hidden;
+    /* Above the sticky sidebar, which creates its own stacking context and
+       would otherwise stay undimmed while the rest of the page darkens. */
     transition: opacity .18s ease, visibility .18s ease; z-index: 40;
   }
   .overlay.open { opacity: 1; pointer-events: auto; visibility: visible; }
   .drawer {
-    position: fixed; top: 0; right: 0; bottom: 0; width: min(440px, 92vw);
-    background: var(--bg-deep); border-left: 1px solid var(--line);
-    transform: translateX(24px); opacity: 0; pointer-events: none; visibility: hidden;
-    transition: transform .2s ease, opacity .2s ease, visibility .2s ease;
-    z-index: 41; overflow-y: auto; padding: 26px 28px 40px;
+    /* Centred modal, not a right-edge drawer: a paper's abstract is the
+       reason to open this, and 440px of edge column made it a narrow ribbon.
+       max-height + overflow keeps a long abstract scrollable inside the card
+       instead of pushing the page. */
+    /* inset:0 + margin:auto centres against the visual viewport; left:50%
+       measures the scrollbar-less width and lands a few px off. */
+    position: fixed; inset: 0; margin: auto;
+    width: min(760px, 92vw); height: fit-content; max-height: min(84vh, 900px);
+    transform: scale(.985);
+    background: var(--bg-deep); border: 1px solid var(--line); border-radius: 10px;
+    box-shadow: 0 24px 60px rgba(0,0,0,.45);
+    opacity: 0; pointer-events: none; visibility: hidden;
+    transition: transform .18s ease, opacity .18s ease, visibility .18s ease;
+    z-index: 41; overflow-y: auto; padding: 30px 34px 36px;
   }
   .drawer.open { transform: none; opacity: 1; pointer-events: auto; visibility: visible; }
   .drawer h2 { font: 500 21px/1.3 var(--serif); margin: 4px 0 6px; }
@@ -252,7 +263,7 @@
   .kv { width: 100%; margin: 6px 0; }
   .kv td { padding: 4px 0; border: none; vertical-align: top; }
   .kv td:first-child { color: var(--ink-faint); width: 96px; font-size: 12px; padding-top: 6px; }
-  .abstract { font: 400 14.5px/1.65 var(--serif); color: var(--ink-dim); max-width: 62ch; margin: 14px 0; }
+  .abstract { font: 400 15px/1.7 var(--serif); color: var(--ink-dim); max-width: 68ch; margin: 16px 0; }
   .drawer .sec { border-top: 1px solid var(--line-soft); margin-top: 18px; padding-top: 14px; }
   .drawer .sec .h { font-size: 12px; color: var(--ink-faint); margin-bottom: 8px; }
 
@@ -793,6 +804,10 @@ const pages = {
       ).join("") : '<div class="empty-block"><h3>No activity yet</h3><p>Ingest papers and run analysis to build a history.</p></div>'}`;
     $("main").querySelectorAll("[data-hf]").forEach(b =>
       b.addEventListener("click", () => { state.historyFilter = b.dataset.hf; render(); }));
+    $("main").querySelectorAll("[data-paper]").forEach(a =>
+      a.addEventListener("click", ev => { ev.preventDefault(); openDrawer(a.dataset.paper); }));
+    $("main").querySelectorAll("[data-report]").forEach(a =>
+      a.addEventListener("click", ev => { ev.preventDefault(); openReportById(a.dataset.report); }));
   },
 
   manual: async () => {
@@ -1060,13 +1075,18 @@ function eventRow(e) {
   const c = STREAM_COLOR[e.key];
   let main, trail = "";
   if (e.key === "papers") {
-    main = '<a href="#/papers/' + esc(e.it.id) + '">' + esc(e.it.title) + "</a>";
+    // Open the detail modal over the current page rather than routing to
+    // #/papers/<id>: jumping to another page to read one abstract loses the
+    // reader's place in the feed.
+    main = '<a href="#" data-paper="' + esc(e.it.id) + '">' + esc(e.it.title) + "</a>";
     trail = e.it.source || "";
   } else if (e.key === "gaps") {
     main = esc(e.it.description);
     trail = e.it.topic_id ? "topic " + esc(e.it.topic_id.slice(0, 8)) : "";
   } else {
-    main = '<a href="#/results">' + esc(e.it.title) + "</a>";
+    // Same reasoning as papers: open the report over the feed rather than
+    // navigating to Results and making the reader find it again.
+    main = '<a href="#" data-report="' + esc(e.it.id) + '">' + esc(e.it.title) + "</a>";
   }
   return '<div class="ev"><span class="tick">' + clock(e.date) + '</span>' +
     '<span class="mark" style="background:' + c + '"></span><span>' + main + "</span>" +
@@ -1210,7 +1230,16 @@ function bindRowControls(root) {
 }
 
 /* ───────────────────────── drawer ───────────────────────── */
-function openDrawer(id) {
+async function openDrawer(id) {
+  // Callable from any page (History included), so the paper list may not be
+  // loaded yet — fetch it once on demand.
+  if (!state.papersLoaded) {
+    try {
+      const data = await api("/api/papers");
+      state.papers = data.papers;
+      state.papersLoaded = true;
+    } catch { return; }
+  }
   const p = state.papers.find(x => x.id === id);
   if (!p) return;
   const links = [];
@@ -1238,7 +1267,12 @@ function openDrawer(id) {
       '<tr><td>ID</td><td class="mono">' + esc(p.id) + "</td></tr></table></div>";
   $("drawer").classList.add("open");
   $("overlay").classList.add("open");
-  $("drawer-x").focus();
+  // The node is reused between papers, so it retains the last scroll offset
+  // and would open mid-abstract with the title and close button out of view.
+  // preventScroll matters: a plain focus() scrolls the button into view and
+  // undoes the reset.
+  $("drawer").scrollTop = 0;
+  $("drawer-x").focus({ preventScroll: true });
   bindRowControls($("drawer"));
   $("drawer-read")?.addEventListener("click", () => openPaperReader(p.id));
   $("drawer-x").addEventListener("click", closeDrawer);
@@ -1287,6 +1321,19 @@ async function openPaperReader(id) {
     $("paper-body").innerHTML = '<span class="dim">' + esc(e.message) + "</span>";
   }
 }
+/// Open a report by id. History events carry only id/title/date, so the full
+/// record (with its sections) has to come from /api/results.
+async function openReportById(id) {
+  let rep = resultsCache?.reps?.find(r => r.id === id);
+  if (!rep) {
+    try {
+      const r = await api("/api/results");
+      rep = (r.reports || []).find(x => x.id === id);
+    } catch { return; }
+  }
+  if (rep) openReader(rep);
+}
+
 function openReader(rep) {
   $("reader").innerHTML =
     '<button class="exit" id="reader-x">Close</button><div class="inner">' +
