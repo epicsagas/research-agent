@@ -33,19 +33,62 @@
     --warn: #D69518;
     --bad: #C4553D;
 
+    /* theme-dependent surfaces that were previously hardcoded */
+    --overlay-bg: rgba(10,8,5,.55);
+    --modal-shadow: 0 24px 60px rgba(0,0,0,.45);
+    --read-body: #CFC7B8;
+    --sel-bg: rgba(240,190,58,.25);
+    --ramp-0: #3a352c; --ramp-1: #7d745f; --ramp-2: #B7AD97;
+
     --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
     --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
     --r: 6px;
   }
+
+  /* Light theme. Warm paper rather than plain white so the amber accents and
+     the serif headings keep the same character they have on dark. */
+  html[data-theme="light"] {
+    --bg: #F5F1E8;
+    --bg-deep: #EFE9DC;
+    --surface: #FFFCF6;
+    --surface-2: #F7F2E6;
+    --line: #D8D0BE;
+    --line-soft: #E4DDCC;
+    --ink: #2A2620;
+    --ink-dim: #5E5749;
+    --ink-faint: #8A8271;
+
+    /* Accents darkened for contrast against a light ground (WCAG AA on text). */
+    --c-blue: #2A6791;
+    --c-amber: #8F6208;
+    --c-purple: #7B45A3;
+    --c-green: #1F7C3F;
+
+    --d1: #EBDCA8; --d2: #D9BE68; --d3: #C09A2E; --d4: #96751B; --d5: #6B5311;
+
+    --ok: #1F7C3F;
+    --warn: #A5710D;
+    --bad: #A63D28;
+
+    --overlay-bg: rgba(60,50,30,.34);
+    --modal-shadow: 0 24px 60px rgba(90,75,45,.20);
+    --read-body: #3A342B;
+    --sel-bg: rgba(200,150,30,.22);
+    --ramp-0: #E0D8C6; --ramp-1: #B3A98F; --ramp-2: #6E6553;
+  }
+
   * { box-sizing: border-box; }
   html, body { height: 100%; }
+  html { color-scheme: dark; }
+  html[data-theme="light"] { color-scheme: light; }
   body {
     margin: 0; background: var(--bg); color: var(--ink);
     font: 14px/1.55 var(--sans);
+    transition: background .18s ease, color .18s ease;
   }
-  ::selection { background: rgba(240,190,58,.25); }
+  ::selection { background: var(--sel-bg); }
   a { color: inherit; }
   button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
   input, select {
@@ -60,7 +103,24 @@
   .faint { color: var(--ink-faint); }
 
   /* ── shell ── */
-  .app { display: grid; grid-template-columns: 232px 1fr; min-height: 100vh; }
+  .app { display: grid; grid-template-columns: 232px 1fr; grid-template-rows: auto 1fr; min-height: 100vh; }
+  aside { grid-row: 1 / -1; grid-column: 1; }
+  /* min-width:0 — grid items default to min-width:auto and would otherwise
+     refuse to shrink below their content, pushing past the track. */
+  .topbar { grid-column: 2; grid-row: 1; min-width: 0; }
+  main { grid-column: 2; grid-row: 2; min-width: 0; }
+  /* Desktop only: the burger belongs to the mobile drawer. */
+  @media (min-width: 901px) {
+    #burger { display: none; }
+    .scrim { display: none !important; }
+  }
+  @media (max-width: 900px) {
+    /* One column, so the bar and content both live in column 1 and the
+       sidebar leaves the flow entirely (it is fixed-positioned below). */
+    .app { grid-template-columns: 1fr; }
+    .topbar { grid-column: 1; grid-row: 1; }
+    main { grid-column: 1; grid-row: 2; }
+  }
   aside {
     background: var(--bg-deep); border-right: 1px solid var(--line);
     padding: 22px 0 18px; display: flex; flex-direction: column;
@@ -90,7 +150,7 @@
   .dot.bad { background: var(--bad); }
   .dot.dim2 { background: var(--ink-faint); }
 
-  main { padding: 30px 36px 60px; max-width: 1160px; width: 100%; }
+  main { padding: 30px 36px 60px; max-width: 1160px; width: 100%; min-width: 0; }
   .page-head { display: flex; align-items: baseline; gap: 16px; margin-bottom: 6px; }
   h1 { font: 600 24px/1.2 var(--serif); margin: 0; letter-spacing: .005em; }
   .page-sub { color: var(--ink-dim); font-size: 13px; }
@@ -233,7 +293,7 @@
 
   /* ── drawer ── */
   .overlay {
-    position: fixed; inset: 0; background: rgba(10,8,5,.55);
+    position: fixed; inset: 0; background: var(--overlay-bg);
     opacity: 0; pointer-events: none; visibility: hidden;
     /* Above the sticky sidebar, which creates its own stacking context and
        would otherwise stay undimmed while the rest of the page darkens. */
@@ -251,7 +311,7 @@
     width: min(760px, 92vw); height: fit-content; max-height: min(84vh, 900px);
     transform: scale(.985);
     background: var(--bg-deep); border: 1px solid var(--line); border-radius: 10px;
-    box-shadow: 0 24px 60px rgba(0,0,0,.45);
+    box-shadow: var(--modal-shadow);
     opacity: 0; pointer-events: none; visibility: hidden;
     transition: transform .18s ease, opacity .18s ease, visibility .18s ease;
     z-index: 41; overflow-y: auto; padding: 30px 34px 36px;
@@ -277,7 +337,7 @@
   .reader h1 { font-size: 30px; margin-bottom: 4px; }
   .reader .meta { color: var(--ink-faint); font-size: 13px; margin-bottom: 34px; }
   .reader h3 { font: 500 18px var(--serif); margin: 30px 0 10px; }
-  .reader .body { font: 400 15.5px/1.75 var(--serif); color: #CFC7B8; max-width: 66ch; white-space: pre-wrap; }
+  .reader .body { font: 400 15.5px/1.75 var(--serif); color: var(--read-body); max-width: 66ch; white-space: pre-wrap; }
   .reader .page-anchor { display: flex; align-items: center; gap: 12px; margin: 26px 0 14px; font: 500 11px var(--sans); letter-spacing: .08em; color: var(--ink-dim); }
   .reader .pdf { width: 100%; height: calc(100vh - 60px); border: 1px solid var(--line); border-radius: var(--r); background: #525659; }
   .reader .page-anchor::before, .reader .page-anchor::after { content: ""; flex: 1; height: 1px; background: var(--line-soft); }
@@ -336,15 +396,60 @@
   }
   @media (max-width: 900px) {
     .app { grid-template-columns: 1fr; }
-    aside { position: static; height: auto; flex-direction: row; align-items: center; gap: 4px; padding: 10px 14px; overflow-x: auto; }
-    .wordmark { padding: 0 12px 0 0; border-right: 1px solid var(--line); }
-    .wordmark .s, .side-foot { display: none; }
-    nav { flex-direction: row; padding: 0; }
-    nav a .count { display: none; }
-    main { padding: 22px 18px 50px; }
+    /* Off-canvas drawer rather than a horizontal strip: the nav was scrolling
+       sideways and the labels were the first thing to get cut off. */
+    aside {
+      position: fixed; top: 0; left: 0; bottom: 0; width: 250px; height: 100vh;
+      transform: translateX(-100%); transition: transform .2s ease;
+      z-index: 45; overflow-y: auto;
+    }
+    body.nav-open aside { transform: none; }
+    .scrim {
+      position: fixed; inset: 0; background: var(--overlay-bg); z-index: 44;
+      opacity: 0; pointer-events: none; transition: opacity .2s ease;
+    }
+    body.nav-open .scrim { opacity: 1; pointer-events: auto; }
+    #burger { display: inline-flex; }
+    main { padding: 20px 14px 60px; }
     .tiles { grid-template-columns: repeat(2, 1fr); }
     .cols { grid-template-columns: 1fr; }
   }
+
+  /* ── keep content inside the viewport on narrow screens ── */
+  @media (max-width: 620px) {
+    .tiles { grid-template-columns: 1fr; }
+    main { padding: 16px 12px 60px; }
+    h1 { font-size: 21px; }
+    .page-head { flex-wrap: wrap; gap: 6px 12px; }
+    .head-actions { margin-left: 0; width: 100%; flex-wrap: wrap; }
+    .toolbar { flex-wrap: wrap; gap: 8px; }
+    .chips { flex-wrap: wrap; }
+    /* Wide tables must not stretch the page. `display:block` + overflow turns
+       each table into its own scroll box; applied to the table itself rather
+       than a wrapper because these tables are rendered from several different
+       places with no common container. */
+    main table {
+      display: block; overflow-x: auto; -webkit-overflow-scrolling: touch;
+      white-space: nowrap; max-width: 100%;
+    }
+    /* The key/value table inside the paper modal is narrow and should wrap. */
+    main table.kv { display: table; white-space: normal; }
+    /* Config form: three 160px-minimum columns need 480px+gap, so it cannot
+       fit a phone. Collapse to one column. */
+    .form { grid-template-columns: 1fr; }
+    main input, main select, main textarea { max-width: 100%; min-width: 0; }
+    main label { max-width: 100%; min-width: 0; }
+    /* Manual: command samples are pre-formatted and scroll on their own. */
+    .manual pre { max-width: 100%; overflow-x: auto; }
+    .panel, .manual div { min-width: 0; }
+    .drawer { padding: 22px 18px 28px; max-height: 90vh; width: 94vw; }
+    .drawer h2 { font-size: 18px; }
+    .reader .inner { padding: 48px 16px 70px; }
+    .reader h1 { font-size: 23px; }
+  }
+
+  /* Long unbroken strings (DOIs, paths, ids) must not widen the page. */
+  .mono, .abstract, td, .ev span { overflow-wrap: anywhere; }
   /* sidebar GitHub badge */
   .side-foot a.gh { display:flex; align-items:center; gap:8px; text-decoration:none; color:var(--ink-dim); }
   .side-foot a.gh svg { width:14px; height:14px; flex:none; }
@@ -359,9 +464,30 @@
   /* gap-table topic pills; click scopes the table to that topic */
   button.gtopic { font:11px var(--sans); color:var(--ink-dim); background:var(--surface-2); border:1px solid var(--line); border-radius:10px; padding:1px 8px; cursor:pointer; white-space:nowrap; }
   button.gtopic:hover { color:var(--ink); border-color:var(--ink-faint); }
+
+  /* ── top bar: hamburger (mobile) + icon actions (always) ── */
+  .topbar {
+    position: sticky; top: 0; z-index: 30;
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 14px; background: var(--bg-deep);
+    border-bottom: 1px solid var(--line);
+  }
+  .topbar .tb-title { font: 600 14px var(--serif); letter-spacing: .01em; }
+  .topbar .spacer { flex: 1; }
+  .iconbtn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+    width: 32px; height: 32px; padding: 0;
+    background: none; border: 1px solid transparent; border-radius: var(--r);
+    color: var(--ink-dim); cursor: pointer; text-decoration: none;
+    font: 500 11.5px var(--sans);
+  }
+  .iconbtn:hover { color: var(--ink); border-color: var(--line); background: var(--surface); }
+  .iconbtn svg { width: 16px; height: 16px; flex: none; }
+  .iconbtn.wide { width: auto; padding: 0 9px; letter-spacing: .02em; }
 </style>
 </head>
 <body>
+<div class="scrim" id="scrim"></div>
 <div class="app">
   <aside>
     <div class="wordmark">
@@ -372,11 +498,20 @@
     <div class="side-foot">
       <div class="row" title="database path"><span class="dot ok"></span><span class="mono" id="foot-db" style="overflow:hidden;text-overflow:ellipsis"></span></div>
       <div class="row" id="foot-llm"><span class="dot dim2"></span><span>LLM not configured</span></div>
-      <a class="row gh" href="https://github.com/epicsagas/research-agent" target="_blank" rel="noopener" title="Source on GitHub">
-        <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
-        <span>GitHub</span></a>
     </div>
   </aside>
+  <div class="topbar">
+    <button class="iconbtn" id="burger" aria-label="Menu" aria-expanded="false">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 4h12M2 8h12M2 12h12"/></svg>
+    </button>
+    <span class="tb-title" id="tb-title"></span>
+    <span class="spacer"></span>
+    <button class="iconbtn wide" id="lang-toggle" aria-label="Language"></button>
+    <button class="iconbtn" id="theme-toggle" aria-label="Theme"></button>
+    <a class="iconbtn" href="https://github.com/epicsagas/research-agent" target="_blank" rel="noopener" aria-label="GitHub">
+      <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+    </a>
+  </div>
   <main id="main"><div class="skel w40"></div><div class="skel w80"></div><div class="skel w60"></div></main>
 </div>
 
@@ -456,6 +591,91 @@ let resultsCache = null;
 const TOPIC_COLLAPSE_AT = 30;
 const REPORTS_CAP = 20;
 
+/* ───────────────────────── theme + language ───────────────────────── */
+/* Both default to the system: prefers-color-scheme for the theme, the browser
+   language for the copy. An explicit toggle is remembered in localStorage and
+   from then on wins over the system value. */
+const I18N = {
+  en: {
+    nav_overview:"Overview", nav_papers:"Papers", nav_pipeline:"Pipeline",
+    nav_history:"History", nav_results:"Results", nav_config:"Config", nav_manual:"Manual",
+    tagline:"local research desk",
+    papers:"papers", topics:"topics", gaps:"gaps", reports:"reports", events:"events",
+    of_shown:"of", shown:"shown", all:"All",
+    unread:"Unread", queued:"Queued", in_progress:"In progress",
+    completed:"Completed", abandoned:"Abandoned",
+    title:"Title", year:"Year", status:"Status", rating:"Rating", relevance:"Relevance",
+    reading_progress:"Reading progress", tags:"Tags", notes:"Notes",
+    added:"Added", updated:"Updated", id:"ID", close:"Close", read_paper:"Read paper",
+    llm_not_configured:"LLM not configured", llm_configured:"LLM configured",
+    sort_recent:"Recently added", theme_light:"Light", theme_dark:"Dark",
+    no_activity:"No activity yet", sections:"sections",
+  },
+  ko: {
+    nav_overview:"개요", nav_papers:"논문", nav_pipeline:"파이프라인",
+    nav_history:"기록", nav_results:"결과", nav_config:"설정", nav_manual:"안내서",
+    tagline:"로컬 연구 데스크",
+    papers:"편", topics:"주제", gaps:"공백", reports:"보고서", events:"건",
+    of_shown:"중", shown:"표시", all:"전체",
+    unread:"안 읽음", queued:"읽을 예정", in_progress:"읽는 중",
+    completed:"다 읽음", abandoned:"중단",
+    title:"제목", year:"연도", status:"상태", rating:"평점", relevance:"관련도",
+    reading_progress:"읽기 진행", tags:"태그", notes:"메모",
+    added:"추가", updated:"수정", id:"ID", close:"닫기", read_paper:"본문 보기",
+    llm_not_configured:"LLM 미설정", llm_configured:"LLM 설정됨",
+    sort_recent:"최근 추가순", theme_light:"라이트", theme_dark:"다크",
+    no_activity:"아직 활동 없음", sections:"개 섹션",
+  },
+};
+
+const systemLang = () => (navigator.language || "en").toLowerCase().startsWith("ko") ? "ko" : "en";
+const systemTheme = () =>
+  window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+
+let LANG = localStorage.getItem("ra-lang") || systemLang();
+let THEME = localStorage.getItem("ra-theme") || systemTheme();
+
+/* Translate a key. Falls back to English, then to the key itself, so a missing
+   entry degrades to readable text instead of blanking the UI. */
+function t(key) {
+  return (I18N[LANG] && I18N[LANG][key]) || I18N.en[key] || key;
+}
+
+/* Read a CSS custom property — chart colours live in the stylesheet so they
+   follow the theme instead of being frozen at first paint. */
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function applyTheme() {
+  document.documentElement.setAttribute("data-theme", THEME);
+  const btn = $("theme-toggle");
+  if (btn) {
+    const sun = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="3.2"/><path d="M8 1v1.8M8 13.2V15M15 8h-1.8M2.8 8H1M12.9 3.1l-1.3 1.3M4.4 11.6l-1.3 1.3M12.9 12.9l-1.3-1.3M4.4 4.4L3.1 3.1"/></svg>';
+    const moon = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M13.5 9.6A5.8 5.8 0 0 1 6.4 2.5a5.8 5.8 0 1 0 7.1 7.1z"/></svg>';
+    btn.innerHTML = THEME === "light" ? moon : sun;
+    btn.title = THEME === "light" ? t("theme_dark") : t("theme_light");
+  }
+}
+
+function applyLang() {
+  document.documentElement.lang = LANG;
+  const btn = $("lang-toggle");
+  if (btn) {
+    btn.textContent = LANG === "ko" ? "EN" : "한";
+    btn.title = LANG === "ko" ? "English" : "한국어";
+  }
+  const tag = document.querySelector(".wordmark .s");
+  if (tag) tag.textContent = t("tagline");
+  // The unconfigured-LLM row is static markup, so it needs translating here;
+  // the configured row renders provider/model names and stays as-is.
+  const llmRow = document.getElementById("foot-llm");
+  if (llmRow && llmRow.dataset.configured !== "1") {
+    const label = llmRow.querySelector("span:last-child");
+    if (label) label.textContent = t("llm_not_configured");
+  }
+}
+
 const ROUTES = ["overview","papers","pipeline","history","results","config","manual"];
 function route() {
   const h = location.hash.replace(/^#\/?/, "");
@@ -463,18 +683,21 @@ function route() {
   const page = ROUTES.includes(name) ? name : "overview";
   return { page, arg: rest || null };
 }
-window.addEventListener("hashchange", render);
+window.addEventListener("hashchange", () => {
+  document.body.classList.remove("nav-open");
+  render();
+});
 
 /* ───────────────────────── shell ───────────────────────── */
 function drawNav(counts) {
   const items = [
-    ["overview","Overview", ICON.overview, null],
-    ["papers","Papers", ICON.papers, counts.papers],
-    ["pipeline","Pipeline", ICON.pipeline, null],
-    ["history","History", ICON.history, null],
-    ["results","Results", ICON.results, counts.gaps],
-    ["config","Config", ICON.config, null],
-    ["manual","Manual", ICON.manual, null],
+    ["overview",t("nav_overview"), ICON.overview, null],
+    ["papers",t("nav_papers"), ICON.papers, counts.papers],
+    ["pipeline",t("nav_pipeline"), ICON.pipeline, null],
+    ["history",t("nav_history"), ICON.history, null],
+    ["results",t("nav_results"), ICON.results, counts.gaps],
+    ["config",t("nav_config"), ICON.config, null],
+    ["manual",t("nav_manual"), ICON.manual, null],
   ];
   const cur = route().page;
   $("nav").innerHTML = items.map(([id, label, icon, n]) =>
@@ -490,6 +713,7 @@ async function loadChrome() {
     $("foot-db").title = ov.db_path;
     const llmRow = $("foot-llm");
     if (cf.llm) {
+      llmRow.dataset.configured = "1";
       llmRow.innerHTML = '<span class="dot ' + (cf.llm.api_key_set ? "ok" : "bad") + '"></span>' +
         "<span>" + esc(cf.llm.provider) + " / " + esc(cf.llm.model) + "</span>";
       llmRow.title = "API key env: " + cf.llm.api_key_env + (cf.llm.api_key_set ? " (set)" : " (missing)");
@@ -714,7 +938,7 @@ const pages = {
     $("main").innerHTML = html;
     funnel("f-depth", DEPTHS, ps, DEPTH_COLOR, DEPTH_LABEL);
     funnel("f-reading", READS.filter(s => s !== "abandoned"), pipe.reading_status,
-      ["#3a352c","#7d745f","#B7AD97","#2FA455"], READ_LABEL);
+      [cssVar("--ramp-0"), cssVar("--ramp-1"), cssVar("--ramp-2"), cssVar("--ok")], READ_LABEL);
     if (pipe.reading_status.abandoned) {
       $("f-reading").innerHTML += '<div class="conv">' + nfmt(pipe.reading_status.abandoned) +
         " abandoned along the way</div>";
@@ -764,7 +988,7 @@ const pages = {
       </div>`;
     funnel("f-depth", DEPTHS, pipe.paper_status, DEPTH_COLOR, DEPTH_LABEL);
     funnel("f-reading", READS.filter(s => s !== "abandoned"), pipe.reading_status,
-      ["#3a352c","#7d745f","#B7AD97","#2FA455"], READ_LABEL);
+      [cssVar("--ramp-0"), cssVar("--ramp-1"), cssVar("--ramp-2"), cssVar("--ok")], READ_LABEL);
   },
 
   history: async () => {
@@ -1375,6 +1599,41 @@ function closeDrawerSilent() {
   $("drawer").classList.remove("open");
   $("overlay").classList.remove("open");
 }
+/* ── chrome wiring: toggles + mobile nav ── */
+applyTheme();
+applyLang();
+
+$("theme-toggle").addEventListener("click", () => {
+  THEME = THEME === "light" ? "dark" : "light";
+  localStorage.setItem("ra-theme", THEME);
+  applyTheme();
+  render();  // charts read their colours from CSS vars at draw time
+});
+
+$("lang-toggle").addEventListener("click", () => {
+  LANG = LANG === "ko" ? "en" : "ko";
+  localStorage.setItem("ra-lang", LANG);
+  applyLang();
+  render();
+});
+
+/* Follow the system only while the user has not chosen for themselves. */
+window.matchMedia?.("(prefers-color-scheme: light)").addEventListener?.("change", e => {
+  if (localStorage.getItem("ra-theme")) return;
+  THEME = e.matches ? "light" : "dark";
+  applyTheme();
+  render();
+});
+
+const setNav = open => {
+  document.body.classList.toggle("nav-open", open);
+  $("burger").setAttribute("aria-expanded", String(open));
+};
+$("burger").addEventListener("click", () => setNav(!document.body.classList.contains("nav-open")));
+$("scrim").addEventListener("click", () => setNav(false));
+// A tap on a nav link should close the drawer, not leave it covering the page.
+$("nav").addEventListener("click", e => { if (e.target.closest("a")) setNav(false); });
+
 render();
 loadChrome();
 </script>
