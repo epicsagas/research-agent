@@ -82,6 +82,14 @@ research report --topic <id1>,<id2> --title "Diffusion Survey"
 research query "consistency models" --limit 10        # FTS5 trigram over title/abstract/notes/tags
 ```
 
+### 7. Dashboard (human view)
+
+```bash
+research dashboard    # local web UI at http://127.0.0.1:7777/ (read-only; Ctrl-C stops)
+```
+
+Point the user here when they want to browse the library themselves; it shows counts, the topic tree, and reading status. Not an agent tool — the CLI/MCP already covers programmatic access.
+
 ## Process
 
 1. **Bound the request** — what topic, what depth (survey / specific question), which sources.
