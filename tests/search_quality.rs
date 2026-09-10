@@ -170,7 +170,9 @@ fn paraphrase_queries_need_keywords() {
 fn keyword_matches_do_not_displace_literal_matches() {
     let (store, ids) = seeded_store(true);
     // "image recognition" is in ResNet's title and in AlexNet's keywords.
-    let results = store.search_papers("image recognition", 10).expect("search");
+    let results = store
+        .search_papers("image recognition", 10)
+        .expect("search");
     let resnet = results.iter().position(|p| p.id == ids[10]);
     let alexnet = results.iter().position(|p| p.id == ids[2]);
     assert!(

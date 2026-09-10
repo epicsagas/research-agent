@@ -770,7 +770,9 @@ async fn cmd_enrich(
         return Ok(());
     }
     if keywords.is_some() {
-        anyhow::bail!("--keywords applies to a single paper: `research enrich <ID> --keywords ...`");
+        anyhow::bail!(
+            "--keywords applies to a single paper: `research enrich <ID> --keywords ...`"
+        );
     }
 
     let limit = limit as usize;

@@ -158,8 +158,9 @@ impl ZoteroWrite {
             #[serde(default)]
             remember: bool,
         }
-        let auth: Auth = serde_json::from_str(&body)
-            .map_err(|e| ResearchError::Source(format!("Zotero authorization parse failed: {e}")))?;
+        let auth: Auth = serde_json::from_str(&body).map_err(|e| {
+            ResearchError::Source(format!("Zotero authorization parse failed: {e}"))
+        })?;
         let mut cached = self.write_key.lock().unwrap();
         *cached = Some((auth.key.clone(), auth.remember));
         Ok(auth.key)
@@ -333,7 +334,10 @@ fn host_of(base_url: &str) -> &str {
         .split('/')
         .next()
         .unwrap_or("");
-    match authority.strip_prefix('[').and_then(|a| a.split(']').next()) {
+    match authority
+        .strip_prefix('[')
+        .and_then(|a| a.split(']').next())
+    {
         Some(v6) => v6,
         None => authority.split(':').next().unwrap_or(""),
     }

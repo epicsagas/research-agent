@@ -416,8 +416,7 @@ impl IndexStore for SqliteStore {
         let conn = self.conn.lock().map_err(|e| {
             ResearchError::Database(rusqlite::Error::InvalidParameterName(e.to_string()))
         })?;
-        let mut stmt =
-            conn.prepare("SELECT * FROM papers ORDER BY updated_at ASC LIMIT ?1")?;
+        let mut stmt = conn.prepare("SELECT * FROM papers ORDER BY updated_at ASC LIMIT ?1")?;
         let rows = stmt.query_map(params![limit as i64], Self::paper_from_row)?;
         let mut papers = Vec::new();
         for paper in rows {
@@ -1563,15 +1562,25 @@ mod tests {
         for i in 0..10 {
             let paper = Paper::new(format!("Enriched {i}"));
             store.insert_paper(&paper).unwrap();
-            store.link_paper_to_topic(&paper.id, &topic.id, 0.9).unwrap();
+            store
+                .link_paper_to_topic(&paper.id, &topic.id, 0.9)
+                .unwrap();
             store.set_paper_keywords(&paper.id, "already").unwrap();
         }
         let needy = Paper::new("Needs keywords".into());
         store.insert_paper(&needy).unwrap();
-        store.link_paper_to_topic(&needy.id, &topic.id, 0.1).unwrap();
+        store
+            .link_paper_to_topic(&needy.id, &topic.id, 0.1)
+            .unwrap();
 
-        let got = store.papers_missing_keywords_by_topic(&topic.id, 2).unwrap();
-        assert_eq!(got.len(), 1, "the low-relevance unenriched paper must surface");
+        let got = store
+            .papers_missing_keywords_by_topic(&topic.id, 2)
+            .unwrap();
+        assert_eq!(
+            got.len(),
+            1,
+            "the low-relevance unenriched paper must surface"
+        );
         assert_eq!(got[0].id, needy.id);
     }
 

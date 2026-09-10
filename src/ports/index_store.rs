@@ -42,8 +42,7 @@ pub trait IndexStore: Send + Sync {
     fn papers_missing_keywords(&self, limit: usize) -> Result<Vec<Paper>>;
     /// Same, scoped to one topic. The `keywords = ''` filter lives in SQL so a
     /// window full of already-enriched papers cannot hide the ones that need work.
-    fn papers_missing_keywords_by_topic(&self, topic_id: &str, limit: usize)
-    -> Result<Vec<Paper>>;
+    fn papers_missing_keywords_by_topic(&self, topic_id: &str, limit: usize) -> Result<Vec<Paper>>;
     /// Papers ordered oldest-update first — the re-enrichment queue, so repeated
     /// `--force` runs advance through the library instead of repeating its head.
     fn papers_stalest(&self, limit: usize) -> Result<Vec<Paper>>;

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 
-use crate::domain::paper::Paper;
 use crate::domain::knowledge_gap::KnowledgeGap;
+use crate::domain::paper::Paper;
 use crate::domain::research_report::ResearchReport;
 use crate::error::Result;
 
