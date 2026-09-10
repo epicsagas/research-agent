@@ -1,0 +1,44 @@
+{
+  "timestamp": "20260909T191436",
+  "dimensions": {
+    "correctness": {
+      "details": {
+        "command": "cargo test --quiet",
+        "exit_code": 0,
+        "stderr_tail": "Context leak detected, CoreAnalytics returned false\nContext leak detected, CoreAnalytics returned false\n",
+        "stdout_tail": "...59 tests\n............i.......................................................................i.. 87/159\n.............i........iii...............................................\ntest result: ok. 153 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 4.90s\n\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n\nrunning 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\n\n",
+        "tests_passed": 0,
+        "tests_total": 0
+      },
+      "duration_ms": 8541,
+      "passed": true,
+      "score": 1.0,
+      "verdict": "PASS"
+    },
+    "quality": {
+      "details": {
+        "command": "cargo clippy --quiet --all-targets -- -D warnings",
+        "exit_code": 0,
+        "lint_score": 1.0,
+        "llm_judge": "SKIPPED",
+        "stderr_tail": "",
+        "stdout_tail": ""
+      },
+      "duration_ms": 1097,
+      "passed": true,
+      "score": 1.0,
+      "verdict": "PASS"
+    },
+    "regression": {
+      "details": {
+        "note": "no previous baseline — first run"
+      },
+      "duration_ms": 0,
+      "passed": true,
+      "score": 1.0,
+      "verdict": "PASS"
+    }
+  },
+  "overall_score": 1.0,
+  "overall_verdict": "PASS"
+}
