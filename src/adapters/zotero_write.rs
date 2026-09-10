@@ -132,10 +132,6 @@ impl ZoteroWrite {
             }
         }
         let server_id = self.ensure_server_id().await?;
-        #[cfg(feature = "mcp")]
-        eprintln!("debug: server_id = {server_id:?}");
-        #[cfg(not(feature = "mcp"))]
-        eprintln!("debug: server_id = {server_id:?}");
         let mut req = self
             .client
             .post(format!("{}local/authorize", self.base_url))
