@@ -557,6 +557,13 @@
     text-transform: uppercase;
   }
   .lang-menu button[aria-selected="true"] .lg-code { display: none; }
+  /* In the sidebar the button hugs the left edge, so open down-and-right
+     (the topbar version opens down-and-left) and cap the height so a short
+     window still scrolls the list instead of clipping it. */
+  #slot-side .lang-menu {
+    right: auto; left: 0;
+    max-height: 55vh; overflow-y: auto;
+  }
 </style>
 </head>
 <body>
