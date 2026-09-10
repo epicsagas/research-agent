@@ -136,6 +136,9 @@ enum Commands {
     /// Push paper tags into a running Zotero (dry-run by default; matched by
     /// DOI). CLI-only by design — never exposed as an MCP tool.
     Export {
+        /// Export sink (only zotero today)
+        #[arg(long, default_value = "zotero")]
+        to: String,
         /// Actually write; without this, only a report is printed
         #[arg(long)]
         apply: bool,
@@ -236,7 +239,7 @@ async fn run() -> Result<()> {
         Commands::Report { title, topic } => cmd_report(db, title, topic).await?,
         Commands::Topics { action } => cmd_topics(db, action)?,
         Commands::Status => cmd_status(db)?,
-        Commands::Export { apply } => cmd_export(db, apply).await?,
+        Commands::Export { to, apply } => cmd_export(db, &to, apply).await?,
         Commands::Read {
             id,
             status,
@@ -807,7 +810,12 @@ fn cmd_status(db: PathBuf) -> Result<()> {
     Ok(())
 }
 
-async fn cmd_export(db: PathBuf, apply: bool) -> Result<()> {
+async fn cmd_export(db: PathBuf, to: &str, apply: bool) -> Result<()> {
+    if to != "zotero" {
+        return Err(anyhow::anyhow!(
+            "unknown export sink '{to}' — only 'zotero' is supported"
+        ));
+    }
     let store = open_store(&db)?;
     let sink = research_agent::adapters::zotero_write::ZoteroWrite::new();
     let report =
