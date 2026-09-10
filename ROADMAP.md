@@ -21,9 +21,9 @@ into their Zotero library.
 
 ## Performance regression gating
 
-A criterion harness exists (`benches/core.rs`: lexical query, hybrid query,
-index rebuild, body-evidence snippet over a deterministic 500-paper corpus,
-hash-embedded fake provider so no ONNX or network is involved). The eval gate
+A criterion harness exists (`benches/core.rs`: lexical query, FTS index
+rebuild, body-evidence snippet over a deterministic 500-paper corpus, so no
+network is involved). The eval gate
 runs it and reports medians, but **informationally**: absolute thresholds are
 machine-dependent and shared CI runners swing 10-30%, so timing never turns
 the gate red. What is deliberately not built: same-machine baseline diffing

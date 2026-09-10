@@ -288,29 +288,15 @@ impl ResearchServer {
         }))
     }
 
-    #[tool(description = "Force a full rebuild of the search index (FTS and the vector index).")]
+    #[tool(description = "Force a full rebuild of the FTS search index.")]
     pub fn index_rebuild(&self) -> CallToolResult {
         let store = match open_store(&self.ctx.db_path) {
             Ok(s) => s,
             Err(e) => return err_result(e),
         };
-        if let Err(e) = store.rebuild_index() {
-            return err_result(e);
-        }
-        match load_config().ok().and_then(|cfg| {
-            crate::application::hybrid_search::HybridSearch::open(
-                &store,
-                cfg.search.as_ref(),
-                crate::application::hybrid_search::index_path_for(&self.ctx.db_path),
-            )
-        }) {
-            Some(mut hybrid) => match hybrid.rebuild(&store) {
-                Ok(()) => ok_value(json!({"rebuilt": true, "vector_index": true})),
-                Err(e) => {
-                    ok_value(json!({"rebuilt": true, "vector_index": false, "note": e.to_string()}))
-                }
-            },
-            None => ok_value(json!({"rebuilt": true, "vector_index": false})),
+        match store.rebuild_index() {
+            Ok(()) => ok_value(json!({"rebuilt": true})),
+            Err(e) => err_result(e),
         }
     }
 
@@ -452,25 +438,46 @@ impl ResearchServer {
     }
 
     #[tool(
-        description = "Search the local paper index by query (hybrid lexical+semantic when the embedding backend is available, lexical otherwise). Returns matching papers (id, title, authors, year, status)."
+        description = "Search the local paper index by query (FTS5 full-text over title, abstract, notes, tags, keywords, and body). Returns matching papers (id, title, authors, year, status). Recall for paraphrased queries depends on stored keywords — see papers_missing_keywords and enrich_paper."
     )]
     pub fn query_papers(&self, Parameters(p): Parameters<QueryPapersParams>) -> CallToolResult {
         let store = match open_store(&self.ctx.db_path) {
             Ok(s) => s,
             Err(e) => return err_result(e),
         };
-        let hybrid = load_config().ok().and_then(|cfg| {
-            crate::application::hybrid_search::HybridSearch::open(
-                &store,
-                cfg.search.as_ref(),
-                crate::application::hybrid_search::index_path_for(&self.ctx.db_path),
-            )
-        });
-        let results = match hybrid {
-            Some(hybrid) => hybrid.search(&store, &p.query, p.limit),
-            None => store.search_papers(&p.query, p.limit),
-        };
+        let results = store.search_papers(&p.query, p.limit);
         tool_result!(results)
+    }
+
+    #[tool(
+        description = "Papers that have no search keywords yet. For each, read its title and abstract, generate 5-10 English keywords (synonyms, expanded acronyms, alternative phrasings a searcher might use that the abstract does not contain), then store them with enrich_paper. This is what makes paraphrased queries findable."
+    )]
+    pub fn papers_missing_keywords(
+        &self,
+        Parameters(p): Parameters<MissingKeywordsParams>,
+    ) -> CallToolResult {
+        let store = match open_store(&self.ctx.db_path) {
+            Ok(s) => s,
+            Err(e) => return err_result(e),
+        };
+        // Clamped: the param is client-supplied and each row carries a full
+        // abstract into the JSON response.
+        let results = store.papers_missing_keywords(p.limit.min(200));
+        tool_result!(results)
+    }
+
+    #[tool(
+        description = "Store search keywords for one paper, e.g. \"transformer; self-attention; sequence modeling\". Overwrites any previous value and reindexes the paper for full-text search."
+    )]
+    pub fn enrich_paper(&self, Parameters(p): Parameters<EnrichPaperParams>) -> CallToolResult {
+        let store = match open_store(&self.ctx.db_path) {
+            Ok(s) => s,
+            Err(e) => return err_result(e),
+        };
+        match store.set_paper_keywords(&p.id, &p.keywords) {
+            Ok(()) => ok_value(json!({"id": p.id, "keywords": p.keywords})),
+            Err(e) => err_result(e),
+        }
     }
 
     #[tool(

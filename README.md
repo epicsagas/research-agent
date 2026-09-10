@@ -49,7 +49,7 @@ The same binary also works as a standalone CLI for terminals and scripts.
 | 🧠 | Agent-native analysis | Gap analysis and reports run inside your agent: tools hand over structured state, the agent reasons, results are persisted |
 | 🔗 | Citation graph | Paper-to-paper reference edges from OpenAlex, forward and reverse, optionally labeled with Semantic Scholar citation intents |
 | 📚 | Paper indexing | arXiv, Semantic Scholar, OpenAlex, Europe PMC (PubMed), bioRxiv-style preprints, local PDFs, and Zotero (a running instance or its export files) |
-| 🔍 | Hybrid search | FTS5 lexical + local-ONNX semantic hits, RRF-fused — works offline |
+| 🔍 | Full-text search | FTS5 trigram over title, abstract, notes, tags, keywords and body — works offline |
 | 📂 | Topic trees | Organize research hierarchically with sub-topics |
 | 📖 | Reading tracker | Queue, track, and rate what you've read |
 | ⚡ | Single binary | No runtime, no server — just `research` |
@@ -160,9 +160,8 @@ brew install epicsagas/tap/research-agent
 
 Run `research init` in a terminal and it walks you through the settings that
 matter: database location, the LLM provider used for gap analysis and reports
-(the key itself is read from the env var you name, never stored in the file),
-and the embedding model for hybrid search, with an option to download the
-model right away. Local servers (Ollama, LM Studio) are probed for their
+(the key itself is read from the env var you name, never stored in the file).
+Local servers (Ollama, LM Studio) are probed for their
 loaded models so you pick from what actually exists. Re-running it is safe:
 existing values become the defaults and nothing is reset.
 
@@ -189,14 +188,14 @@ research --version
 
 | Command | Description |
 |---------|-------------|
-| `research init` | Initialize research workspace (interactive onboarding in a terminal: provider, env-var key name, embedding model + download; `--no-onboard` to skip) |
+| `research init` | Initialize research workspace (interactive onboarding in a terminal: provider, env-var key name; `--no-onboard` to skip) |
 | `research ingest <query> [--source arxiv\|s2\|openalex\|europepmc\|preprints\|all] [--limit <n>] [--topic <id>]` | Ingest papers from arXiv, Semantic Scholar, OpenAlex, Europe PMC (PubMed), or preprint servers (bioRxiv, medRxiv, …); optionally link directly to a topic |
 | `research ingest [--source zotero] [query] [--topic <id>]` | Read papers from a running Zotero over its local API (`ZOTERO_BASE_URL` overrides default endpoint, needs "Allow other applications on this computer to communicate with Zotero" enabled); no query pulls the whole library. Not part of `--source all` — a personal library is not a discovery source |
 | `research ingest --source pdf --path <file\|dir> [--topic <id>]` | Ingest local PDF files (full body text is stored and searchable) |
 | `research import <file\|dir>` | Import BibTeX/BibLaTeX, CSL-JSON, or Zotero JSON files (desktop export or API shape), with abstracts, tags, and normalized DOIs; re-imports skip papers already in the library |
-| `research index [--rebuild]` | Build or rebuild search index (FTS + vector index) |
+| `research index [--rebuild]` | Rebuild the FTS search index |
 | `research reingest [--missing-pages]` | Re-extract stored PDF bodies (adds page markers to bodies ingested before they existed) |
-| `research query <q> [--evidence]` | Search papers — hybrid lexical+semantic when embeddings are available; `--evidence` also shows the matching body text with its section and page |
+| `research query <q> [--evidence]` | Search papers (FTS5 full-text); `--evidence` also shows the matching body text with its section and page |
 | `research references <id> [--cited-by] [--intents]` | Fetch citation-graph edges from OpenAlex; `--cited-by` reverses the direction, `--intents` labels edges with Semantic Scholar citation intents |
 | `research gaps [--topic <id>]` | Analyze knowledge gaps (CLI: uses `[llm]` if configured) |
 | `research report --topic <id>` | Generate research report (CLI: uses `[llm]` if configured) |
@@ -221,15 +220,14 @@ workspaces.
 ## Requirements
 
 - Rust 1.92+ (only if building from source; pre-built binaries need nothing)
-- Data lives at `~/.research/` (`research.db` index, `config.toml`, `embeddings.idx`)
-- Linux binaries target glibc ≥ 2.38 (Ubuntu 24.04+); musl is not built because
-  the bundled ONNX runtime has no musl prebuilts
+- Data lives at `~/.research/` (`research.db` index, `config.toml`)
+- Linux binaries target glibc ≥ 2.38 (Ubuntu 24.04+)
 - Optional: an LLM for `research gaps` / `research report` **from the CLI only** — set `[llm]` in `~/.research/config.toml` (`provider`, `model`, `api_key_env`); the key is read from that env var at call time. The MCP flow never needs it
-- Optional: hybrid search tuning via `[search]` in `~/.research/config.toml` —
-  `provider = "local"` (default, bundled ONNX model) or `"openai"` with
-  `openai_api_key_env`; `model` picks the local model (default `BGESmallENV15`,
-  a small 384-dim model that runs on CPU). See [ROADMAP.md](ROADMAP.md) for
-  what is deliberately not built yet
+- Optional: `research enrich` adds search keywords so queries worded
+  differently from the abstract still find the paper. It uses `[llm]` when set;
+  without one it prints the papers needing keywords, for an agent (or you) to
+  fill in via `research enrich <ID> --keywords "..."`. See
+  [ROADMAP.md](ROADMAP.md) for what is deliberately not built yet
 
 ## Contributing
 

@@ -11,6 +11,7 @@ use research_agent::config::{Config, default_config_path};
 use research_agent::domain::paper::{Rating, ReadingStatus};
 use research_agent::domain::research_topic::ResearchTopic;
 use research_agent::ports::index_store::IndexStore;
+use research_agent::ports::research_engine::ResearchEngine;
 
 #[derive(Parser)]
 #[command(name = "research", version, about = "Personal research assistant")]
@@ -162,6 +163,32 @@ enum Commands {
         body: bool,
     },
 
+    /// Generate search keywords for papers (improves recall for queries whose
+    /// wording differs from the abstract). Uses the configured `[llm]`
+    /// provider; without one, prints the work queue for a host agent to fill
+    /// via `research enrich <ID> --keywords "..."`.
+    Enrich {
+        /// Write keywords for this single paper (requires --keywords)
+        id: Option<String>,
+        /// Keywords to store, e.g. "transformer; self-attention". Mechanical
+        /// write — no LLM call, so a host agent can supply them.
+        #[arg(long)]
+        keywords: Option<String>,
+        /// Only papers linked to this topic
+        #[arg(long)]
+        topic: Option<String>,
+        /// Only papers that have no keywords yet. This is the default; the flag
+        /// exists so the intent can be stated explicitly in scripts.
+        #[arg(long)]
+        missing: bool,
+        /// Include papers that already have keywords (re-generate them)
+        #[arg(long, conflicts_with = "missing")]
+        force: bool,
+        /// Maximum papers to process (1..=1000)
+        #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u16).range(1..=1000))]
+        limit: u16,
+    },
+
     /// Start the local web dashboard (127.0.0.1, read-only)
     Dashboard {
         /// Port override (the config file's `[dashboard] port` otherwise)
@@ -210,7 +237,7 @@ async fn main() {
     init_tracing();
     if let Err(e) = run().await {
         // Display, not the `Termination` Debug path: anyhow's Debug prints a
-        // captured backtrace (ONNX/ort symbols) at the user's terminal.
+        // captured backtrace at the user's terminal.
         eprintln!("Error: {e:#}");
         std::process::exit(1);
     }
@@ -253,6 +280,14 @@ async fn run() -> Result<()> {
             rating,
             body,
         } => cmd_read(db, id, status, rating, body)?,
+        Commands::Enrich {
+            id,
+            keywords,
+            topic,
+            missing,
+            force,
+            limit,
+        } => cmd_enrich(db, id, keywords, topic, missing, force, limit).await?,
         Commands::Dashboard { port } => {
             let config_path = default_config_path();
             research_agent::dashboard::serve(cli.db.clone(), config_path, port).await?;
@@ -276,11 +311,10 @@ fn cmd_init(db_path: PathBuf, no_onboard: bool) -> Result<()> {
             println!("Existing config kept: {}", config_path.display());
             println!("Re-run `research init` in a terminal to reconfigure interactively.");
         } else {
-            let mut config = Config {
+            let config = Config {
                 database_path: db_path,
                 ..Config::default()
             };
-            record_hardware_caps(&mut config);
             let db = config.database_path.clone();
             config.save(&config_path)?;
             open_store(&db)?;
@@ -295,13 +329,7 @@ fn cmd_init(db_path: PathBuf, no_onboard: bool) -> Result<()> {
         .exists()
         .then(|| research_agent::config::Config::load(&config_path))
         .transpose()?;
-    let fresh_config = existing.is_none();
-    let mut config = research_agent::onboard::run(db_path, existing)?;
-    // Hardware caps are only written for a fresh config — an existing one is
-    // never clobbered, including its recorded batch size.
-    if fresh_config {
-        record_hardware_caps(&mut config);
-    }
+    let config = research_agent::onboard::run(db_path, existing)?;
     config.save(&config_path)?;
     let store = open_store(&config.database_path)?;
     drop(store);
@@ -314,15 +342,6 @@ fn cmd_init(db_path: PathBuf, no_onboard: bool) -> Result<()> {
         );
     }
     Ok(())
-}
-
-/// Record hardware-derived embedding caps (batch size, memory budget) into
-/// the config's `[search]` section, creating it when absent.
-fn record_hardware_caps(config: &mut Config) {
-    let probed = research_agent::config::SearchConfig::probed();
-    let search = config.search.get_or_insert_with(Default::default);
-    search.embed_batch_size = probed.embed_batch_size;
-    search.embed_memory_budget_mb = probed.embed_memory_budget_mb;
 }
 
 async fn cmd_ingest(
@@ -431,16 +450,13 @@ async fn cmd_ingest(
         println!("Linked {} papers to topic {topic_id}", all_papers.len());
     }
 
-    if !all_papers.is_empty() {
-        // Embed now so the next query doesn't pay for it. Best-effort by the
-        // hybrid contract: failure here just means the next query falls back
-        // to lexical search and syncs then.
-        if open_hybrid(&store, &db).is_none() {
-            eprintln!("Warning: embedding index unavailable — queries fall back to lexical search");
-        }
-    }
-
     println!("Total: {} papers ingested", all_papers.len());
+    if !all_papers.is_empty() {
+        println!(
+            "Run `research enrich` to add search keywords (improves recall for \
+             queries worded differently from the abstract)."
+        );
+    }
     Ok(())
 }
 
@@ -473,10 +489,6 @@ fn cmd_index(db: PathBuf, rebuild: bool) -> Result<()> {
     let store = open_store(&db)?;
     if rebuild {
         store.rebuild_index()?;
-        let hybrid = open_hybrid(&store, &db);
-        if let Some(mut hybrid) = hybrid {
-            hybrid.rebuild(&store)?;
-        }
         println!("Index rebuilt.");
     } else {
         println!("Index is auto-maintained. Use --rebuild to force.");
@@ -484,26 +496,9 @@ fn cmd_index(db: PathBuf, rebuild: bool) -> Result<()> {
     Ok(())
 }
 
-/// Best-effort hybrid search stack: `None` (lexical-only fallback) when the
-/// embedding backend or index is unavailable. Never surfaces errors.
-fn open_hybrid(
-    store: &research_agent::adapters::sqlite_store::SqliteStore,
-    db_path: &std::path::Path,
-) -> Option<research_agent::application::hybrid_search::HybridSearch> {
-    let cfg = load_config().ok()?.search;
-    research_agent::application::hybrid_search::HybridSearch::open(
-        store,
-        cfg.as_ref(),
-        research_agent::application::hybrid_search::index_path_for(db_path),
-    )
-}
-
 fn cmd_query(db: PathBuf, query: String, limit: usize, evidence: bool) -> Result<()> {
     let store = open_store(&db)?;
-    let results = match open_hybrid(&store, &db) {
-        Some(hybrid) => hybrid.search(&store, &query, limit)?,
-        None => store.search_papers(&query, limit)?,
-    };
+    let results = store.search_papers(&query, limit)?;
 
     // Evidence is a separate pass over stored bodies: it answers "where in the
     // paper", which the ranked paper list cannot.
@@ -748,9 +743,148 @@ async fn cmd_reingest(db: PathBuf, missing_pages: bool) -> Result<()> {
 
     println!("Re-ingested {done} paper(s), skipped {skipped}, failed {failed}.");
     if done > 0 {
-        println!("Run `research index --rebuild` to re-embed the updated bodies.");
+        println!("Run `research index --rebuild` to reindex the updated bodies.");
     }
     Ok(())
+}
+
+async fn cmd_enrich(
+    db: PathBuf,
+    id: Option<String>,
+    keywords: Option<String>,
+    topic: Option<String>,
+    _missing: bool,
+    force: bool,
+    limit: u16,
+) -> Result<()> {
+    let store = open_store(&db)?;
+
+    // Mechanical single-paper write: the path a host agent uses when this
+    // install has no [llm] provider of its own.
+    if let Some(paper_id) = id {
+        let Some(kws) = keywords else {
+            anyhow::bail!("`research enrich <ID>` needs --keywords \"kw1; kw2\"");
+        };
+        store.set_paper_keywords(&paper_id, &kws)?;
+        println!("Keywords set for {paper_id}.");
+        return Ok(());
+    }
+    if keywords.is_some() {
+        anyhow::bail!("--keywords applies to a single paper: `research enrich <ID> --keywords ...`");
+    }
+
+    let limit = limit as usize;
+    let candidates = enrich_candidates(&store, topic.as_deref(), force, limit)?;
+
+    if candidates.is_empty() {
+        // Say which of the two it is. "Everything is enriched" and "the scope is
+        // empty" look identical from here, and telling a user their topic is
+        // fully enriched when it simply has no papers sends them looking in the
+        // wrong place.
+        match (&topic, force) {
+            (Some(tid), _) if store.list_papers_by_topic(tid, Some(1))?.is_empty() => {
+                println!("Topic {tid} has no linked papers.");
+            }
+            (_, true) => println!("No papers in scope."),
+            _ => println!("Nothing to enrich — every paper in scope already has keywords."),
+        }
+        return Ok(());
+    }
+
+    // Decide the mode from the config, not from an empty result. An LLM that
+    // returns nothing usable is a different problem than having no LLM, and
+    // telling that user to configure a provider they already configured sends
+    // them to the wrong fix.
+    let has_llm = load_config().map(|c| c.llm.is_some()).unwrap_or(false);
+    let pairs = if has_llm {
+        let inner_store = open_store(&db)?;
+        let engine = make_llm_engine(inner_store)?;
+        engine.extract_keywords(&candidates).await?
+    } else {
+        vec![]
+    };
+
+    // No [llm] configured: print the queue so the calling agent can generate
+    // keywords itself and write them back. Not an error — this is mode B.
+    if !has_llm {
+        println!("{} paper(s) need keywords:\n", candidates.len());
+        for paper in &candidates {
+            let abstract_snippet: String = paper.abstract_text.chars().take(200).collect();
+            println!("{}\n  {}\n  {}\n", paper.id, paper.title, abstract_snippet);
+        }
+        println!(
+            "No [llm] provider configured. Generate 5-10 English keywords per paper \n\
+             (synonyms, expanded acronyms, alternative phrasings) and store them with:\n\
+             \n  research enrich <ID> --keywords \"kw1; kw2; kw3\"\n"
+        );
+        return Ok(());
+    }
+
+    if pairs.is_empty() {
+        println!(
+            "The model returned no usable keywords for {} paper(s). Retry, or set them \
+             manually with `research enrich <ID> --keywords \"...\"`.",
+            candidates.len()
+        );
+        return Ok(());
+    }
+
+    let mut written = 0usize;
+    let mut failed = 0usize;
+    for (paper_id, kws) in &pairs {
+        // A model can return an id it saw in an earlier batch. Only papers we
+        // actually asked about may be written.
+        if !candidates.iter().any(|p| p.id == *paper_id) {
+            eprintln!("Warning: ignoring keywords for {paper_id} — not in this batch");
+            failed += 1;
+            continue;
+        }
+        match store.set_paper_keywords(paper_id, kws) {
+            Ok(()) => written += 1,
+            // A hallucinated id is the model's error, not a reason to abort the
+            // whole batch — the other papers still get their keywords.
+            Err(e) => {
+                eprintln!("Warning: could not set keywords for {paper_id}: {e}");
+                failed += 1;
+            }
+        }
+    }
+    println!("Enriched {written} paper(s).");
+    if failed > 0 {
+        println!("{failed} paper(s) skipped (see warnings above).");
+    }
+    if written + failed < candidates.len() {
+        println!(
+            "{} paper(s) went unanswered (batch token budget or a short response) — \
+             re-run to continue.",
+            candidates.len() - written - failed
+        );
+    }
+    Ok(())
+}
+
+/// Pick the papers to enrich. Split out from `cmd_enrich` so the four
+/// (topic, force) combinations are testable without an LLM or a CLI parse.
+///
+/// `force` re-enriches papers that already have keywords, ordered oldest-update
+/// first so repeated runs walk through the set instead of re-processing the
+/// same relevance-ranked head every time.
+fn enrich_candidates(
+    store: &research_agent::adapters::sqlite_store::SqliteStore,
+    topic: Option<&str>,
+    force: bool,
+    limit: usize,
+) -> Result<Vec<research_agent::domain::paper::Paper>> {
+    let papers = match (topic, force) {
+        // Filtering in SQL, not in Rust: fetching a fixed window and filtering
+        // after it would report "nothing to enrich" whenever the window happens
+        // to be full of already-enriched papers.
+        (Some(tid), false) => store.papers_missing_keywords_by_topic(tid, limit)?,
+        (Some(tid), true) => store.papers_by_topic_stalest(tid, limit)?,
+        (None, false) => store.papers_missing_keywords(limit)?,
+        (None, true) => store.papers_stalest(limit)?,
+    };
+    Ok(papers)
 }
 
 async fn cmd_gaps(db: PathBuf, topic: Option<String>) -> Result<()> {

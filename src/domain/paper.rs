@@ -123,6 +123,13 @@ pub struct Paper {
     pub reading_status: ReadingStatus,
     /// User rating 1–5, None if not yet rated.
     pub rating: Option<Rating>,
+    /// Search-only keywords generated from the title and abstract (by the
+    /// configured LLM, or by a host agent through `research enrich`).
+    /// Indexed by FTS5 so a paraphrased query can reach a paper whose abstract
+    /// never uses the query's wording. Deliberately separate from `tags`,
+    /// which are the user's own and get pushed to Zotero.
+    #[serde(default)]
+    pub keywords: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -149,6 +156,7 @@ impl Paper {
             relevance_score: 0.5,
             reading_status: ReadingStatus::Unread,
             rating: None,
+            keywords: String::new(),
             created_at: now.clone(),
             updated_at: now,
         }

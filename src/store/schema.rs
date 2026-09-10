@@ -10,10 +10,54 @@ pub const MIGRATION_SQL: &[(&str, &str)] = &[
         "ALTER TABLE papers ADD COLUMN openalex_id TEXT",
         "openalex_id",
     ),
+    (
+        "ALTER TABLE papers ADD COLUMN keywords TEXT NOT NULL DEFAULT ''",
+        "keywords",
+    ),
 ];
 
+/// Rebuilds `papers_fts` so it carries the `keywords` column, plus the three
+/// triggers that feed it. Unlike `MIGRATION_SQL` this cannot be guarded by a
+/// column check: `papers_fts` is a virtual table created with
+/// `IF NOT EXISTS`, so an existing database keeps its old 4-column definition
+/// forever unless the table is dropped and recreated. Runs only when the
+/// stored schema version lags `TARGET_SCHEMA_VERSION` — the trailing `rebuild`
+/// re-indexes the whole corpus, which is O(corpus), not something to repeat on
+/// every open. Must run AFTER the `keywords` column exists: the recreated
+/// triggers reference `new.keywords`.
+pub const FTS_V3_SQL: &str = r#"
+DROP TRIGGER IF EXISTS papers_ai;
+DROP TRIGGER IF EXISTS papers_ad;
+DROP TRIGGER IF EXISTS papers_au;
+DROP TABLE IF EXISTS papers_fts;
+
+CREATE VIRTUAL TABLE papers_fts USING fts5(
+    title, abstract_text, notes, tags, keywords,
+    content=papers, content_rowid=rowid, tokenize='trigram'
+);
+
+CREATE TRIGGER papers_ai AFTER INSERT ON papers BEGIN
+    INSERT INTO papers_fts(rowid, title, abstract_text, notes, tags, keywords)
+    VALUES (new.rowid, new.title, new.abstract_text, new.notes, new.tags, new.keywords);
+END;
+
+CREATE TRIGGER papers_ad AFTER DELETE ON papers BEGIN
+    INSERT INTO papers_fts(papers_fts, rowid, title, abstract_text, notes, tags, keywords)
+    VALUES('delete', old.rowid, old.title, old.abstract_text, old.notes, old.tags, old.keywords);
+END;
+
+CREATE TRIGGER papers_au AFTER UPDATE ON papers BEGIN
+    INSERT INTO papers_fts(papers_fts, rowid, title, abstract_text, notes, tags, keywords)
+    VALUES('delete', old.rowid, old.title, old.abstract_text, old.notes, old.tags, old.keywords);
+    INSERT INTO papers_fts(rowid, title, abstract_text, notes, tags, keywords)
+    VALUES (new.rowid, new.title, new.abstract_text, new.notes, new.tags, new.keywords);
+END;
+
+INSERT INTO papers_fts(papers_fts) VALUES('rebuild');
+"#;
+
 /// `_meta.schema_version` written once `MIGRATION_SQL` is fully applied.
-pub const TARGET_SCHEMA_VERSION: i64 = 2;
+pub const TARGET_SCHEMA_VERSION: i64 = 3;
 
 pub const SCHEMA_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -38,12 +82,13 @@ CREATE TABLE IF NOT EXISTS papers (
     tags TEXT NOT NULL DEFAULT '[]',
     relevance_score REAL NOT NULL DEFAULT 0.5,
     rating INTEGER,
+    keywords TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS papers_fts USING fts5(
-    title, abstract_text, notes, tags,
+    title, abstract_text, notes, tags, keywords,
     content=papers, content_rowid=rowid, tokenize='trigram'
 );
 
@@ -93,20 +138,20 @@ CREATE TABLE IF NOT EXISTS research_reports (
 );
 
 CREATE TRIGGER IF NOT EXISTS papers_ai AFTER INSERT ON papers BEGIN
-    INSERT INTO papers_fts(rowid, title, abstract_text, notes, tags)
-    VALUES (new.rowid, new.title, new.abstract_text, new.notes, new.tags);
+    INSERT INTO papers_fts(rowid, title, abstract_text, notes, tags, keywords)
+    VALUES (new.rowid, new.title, new.abstract_text, new.notes, new.tags, new.keywords);
 END;
 
 CREATE TRIGGER IF NOT EXISTS papers_ad AFTER DELETE ON papers BEGIN
-    INSERT INTO papers_fts(papers_fts, rowid, title, abstract_text, notes, tags)
-    VALUES('delete', old.rowid, old.title, old.abstract_text, old.notes, old.tags);
+    INSERT INTO papers_fts(papers_fts, rowid, title, abstract_text, notes, tags, keywords)
+    VALUES('delete', old.rowid, old.title, old.abstract_text, old.notes, old.tags, old.keywords);
 END;
 
 CREATE TRIGGER IF NOT EXISTS papers_au AFTER UPDATE ON papers BEGIN
-    INSERT INTO papers_fts(papers_fts, rowid, title, abstract_text, notes, tags)
-    VALUES('delete', old.rowid, old.title, old.abstract_text, old.notes, old.tags);
-    INSERT INTO papers_fts(rowid, title, abstract_text, notes, tags)
-    VALUES (new.rowid, new.title, new.abstract_text, new.notes, new.tags);
+    INSERT INTO papers_fts(papers_fts, rowid, title, abstract_text, notes, tags, keywords)
+    VALUES('delete', old.rowid, old.title, old.abstract_text, old.notes, old.tags, old.keywords);
+    INSERT INTO papers_fts(rowid, title, abstract_text, notes, tags, keywords)
+    VALUES (new.rowid, new.title, new.abstract_text, new.notes, new.tags, new.keywords);
 END;
 
 -- Full extracted body text lives outside `papers` so the Paper domain type and

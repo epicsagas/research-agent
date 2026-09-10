@@ -27,7 +27,7 @@ optional `[llm]` config only powers the standalone CLI.
   `openalex_source`, `pdf_source`, `bib_importer`, `sqlite_store`, LLM/report adapters
 - `src/ports/` — trait boundaries (`paper_source::PaperSource`, `index_store::IndexStore`, …);
   prefer adding a port + fake over a network-dependent test
-- `src/application/` — pipeline orchestration (ingest, import, hybrid search,
+- `src/application/` — pipeline orchestration (ingest, import, keyword enrichment,
   gap analysis, reports)
 - `src/domain/` — `Paper`, statuses, ratings
 - `plugin.json`, `.claude-plugin/`, `.codex-plugin/` — plugin manifests, MCP tool

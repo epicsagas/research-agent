@@ -79,10 +79,23 @@ research report --topic <id1>,<id2> --title "Diffusion Survey"
 ### 6. Search
 
 ```bash
-research query "consistency models" --limit 10        # FTS5 trigram over title/abstract/notes/tags
+research query "consistency models" --limit 10        # FTS5 trigram over title/abstract/notes/tags/keywords + body
 ```
 
-### 7. Dashboard (human view)
+### 7. Enrich (make paraphrased queries findable)
+
+Search is FTS5 full-text: it matches words the paper actually contains. Keywords cover the words it does not — the synonym, the expanded acronym, the phrasing someone would search for first. Without them, a query for "transformer" misses a paper whose abstract only says "attention mechanisms".
+
+```bash
+research enrich --missing --limit 20      # uses [llm] if configured
+research enrich <ID> --keywords "kw1; kw2; kw3"   # mechanical write, no LLM
+```
+
+**When there is no `[llm]` provider, you do this yourself** — that is the normal path for an agent, not a fallback. `research enrich` (or the `papers_missing_keywords` MCP tool) prints papers with no keywords yet. For each: read the title and abstract, then write 5-10 English keywords covering synonyms, expanded acronyms, broader field terms, and alternative phrasings. Do not repeat words already in the title or abstract — FTS5 already indexes those. Store each with `enrich_paper` (MCP) or `research enrich <ID> --keywords "..."`.
+
+Run this after any ingest. Newly ingested papers have no keywords.
+
+### 8. Dashboard (human view)
 
 ```bash
 research dashboard    # local web UI at http://127.0.0.1:7777/ (read-only; Ctrl-C stops)
@@ -96,10 +109,11 @@ Point the user here when they want to browse the library themselves; it shows co
 2. **Ensure workspace** — `cd ~/research-ws` or create + `research init`; verify `[llm]` if gaps/report needed.
 3. **Create/locate topic** — `topics add` (with `--parent` for sub-areas); note the id.
 4. **Ingest** — `ingest --topic <id>` so papers link automatically.
-5. **Triage** — `query` / `read` to skim; set `--status` and `--rating` for the relevant ones.
-6. **Analyze** — `gaps --topic <id>` to find holes.
-7. **Synthesize** — `report --topic <id>` for a written summary.
-8. **Report to the user in Korean** — summarize: 수집 논문 수, 핵심 논문(제목/평점), 식별된 갭, 보고서 경로.
+5. **Enrich** — `enrich --missing` (generate the keywords yourself when no `[llm]` is set) so later queries survive paraphrasing.
+6. **Triage** — `query` / `read` to skim; set `--status` and `--rating` for the relevant ones.
+7. **Analyze** — `gaps --topic <id>` to find holes.
+8. **Synthesize** — `report --topic <id>` for a written summary.
+9. **Report to the user in Korean** — summarize: 수집 논문 수, 핵심 논문(제목/평점), 식별된 갭, 보고서 경로.
 
 ## Anti-Rationalization
 

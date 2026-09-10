@@ -702,7 +702,7 @@ const pages = {
             <p>One-time setup, then a loop of ingest, index, query.</p>
             <pre>research init                        # workspace + config walkthrough
 research ingest "query"              # pull papers (default: all sources)
-research index                       # build / refresh the hybrid index
+research index                       # refresh the full-text index
 research query "query" --evidence    # search metadata + full text</pre>
             <p class="dim">Every step is safe to re-run: ingest skips duplicates, the index syncs incrementally.</p>
           </div>
@@ -747,9 +747,10 @@ research report --topic a,b --title "..."</pre>
           </div>
           <div class="panel">
             <div class="ph">Search index</div>
-            <p>Hybrid search fuses lexical (FTS5) hits with local embedding hits. The index syncs incrementally on every ingest; changing the model forces one rebuild.</p>
-            <pre>research index --rebuild     # force a full rebuild</pre>
-            <p class="dim">If queries fall back to lexical-only, check <span class="mono">[search]</span> in the config — an unknown model name warns instead of failing silently.</p>
+            <p>Search is FTS5 full-text over title, abstract, notes, tags, keywords, and extracted body. The index is maintained automatically on every write.</p>
+            <pre>research index --rebuild     # force a full rebuild
+research enrich             # add search keywords</pre>
+            <p class="dim">Keywords cover the words a paper does <i>not</i> contain — synonyms, expanded acronyms, alternative phrasings — so a query worded differently from the abstract still finds it. <span class="mono">research enrich</span> uses <span class="mono">[llm]</span> when configured; without one it lists the papers needing keywords for an agent to fill in.</p>
           </div>
           <div class="panel">
             <div class="ph">Zotero write-back</div>
@@ -763,7 +764,7 @@ research report --topic a,b --title "..."</pre>
           </div>
           <div class="panel">
             <div class="ph">Config file</div>
-            <p><span class="mono">~/.research/config.toml</span> — three sections: <span class="mono">[llm]</span> (provider, model, the key's <i>env var name</i>), <span class="mono">[search]</span> (provider local/openai, model, batch size), <span class="mono">[dashboard]</span> (host, port, token). Secrets are never written to the file.</p>
+            <p><span class="mono">~/.research/config.toml</span> — two sections: <span class="mono">[llm]</span> (provider, model, the key's <i>env var name</i>) and <span class="mono">[dashboard]</span> (host, port, token). Secrets are never written to the file.</p>
           </div>
           <div class="panel">
             <div class="ph">Source</div>
