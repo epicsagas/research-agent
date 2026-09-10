@@ -6,7 +6,7 @@
 //! without sockets; the accept loop stays thin.
 
 use crate::adapters::sqlite_store::SqliteStore;
-use crate::config::{Config, default_config_path};
+use crate::config::Config;
 use crate::domain::paper::{Paper, PaperStatus, ReadingStatus};
 use crate::ports::index_store::IndexStore;
 use serde_json::{Value, json};
@@ -163,8 +163,9 @@ pub async fn serve(
         let (stream, _) = listener.accept().await?;
         let db_path = db_path.clone();
         let db_override = db_override.clone();
+        let config_path = config_path.clone();
         tokio::spawn(async move {
-            if let Err(e) = handle_conn(stream, db_path, db_override).await {
+            if let Err(e) = handle_conn(stream, db_path, db_override, config_path).await {
                 tracing::debug!(error = %e, "dashboard connection error");
             }
         });
@@ -177,6 +178,7 @@ async fn handle_conn(
     mut stream: TcpStream,
     db_path: PathBuf,
     db_override: Option<PathBuf>,
+    config_path: PathBuf,
 ) -> anyhow::Result<()> {
     let mut buf = Vec::with_capacity(1024);
     let mut chunk = [0u8; 1024];
@@ -259,13 +261,15 @@ async fn handle_conn(
     };
     let authz = header("Authorization:", "authorization:");
     let cookie = header("Cookie:", "cookie:");
-    let token = Config::load(&default_config_path())
+    // Auth reads the same file `serve` started from; falling back to the
+    // default here would split routing and auth across two configs.
+    let token = Config::load(&config_path)
         .ok()
         .and_then(|c| c.dashboard.token);
     let ctx = RouteCtx {
         db_path,
         db_override,
-        config_path: default_config_path(),
+        config_path,
         host: host.map(String::from),
         content_type: content_type.map(String::from),
         authz: authz.map(String::from),
