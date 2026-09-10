@@ -176,8 +176,8 @@ impl PdfSource {
                 .to_string(),
         );
 
-        // Keep the full body (section-marked, size-capped) so FTS5 and the
-        // vector index can search inside the paper, not just its metadata.
+        // Keep the full body (section-marked, size-capped) so the full-text
+        // index can search inside the paper, not just its metadata.
         // ponytail: 500_000-char cap per paper — a real ceiling; raise if
         // book-length PDFs matter someday.
         let body = prepare_body(&text);
