@@ -43,8 +43,10 @@ The same binary also works as a standalone CLI for terminals and scripts.
 
 ## Web UI
 
-<img width="49%" src="./assets/overview.png" alt="dashboard-overview" />
-<img width="49%" src="./assets/papers.png" alt="dashboard-overview" />
+<p align="center">
+  <img width="48%" src="./assets/overview.png" alt="dashboard-overview" />
+  <img width="48%" src="./assets/papers.png" alt="dashboard-overview" />
+</p>
 
 ## Features
 
@@ -113,6 +115,21 @@ Once installed, ask your agent things like:
 - "What gaps are left in my <topic> coverage?"
 - "Generate a survey report for <topic>"
 
+What those requests look like on the tool level:
+
+| You ask | The agent chains |
+|---------|------------------|
+| Survey a topic end to end | `init` → `topic_add` → `ingest` (arXiv/S2, linked to the topic) → `topic_brief` → the agent reasons over the brief with its own model → `gaps_record` → `ingest` again aimed at the recorded gaps → `report_material` → `report_save` |
+| Find something already in the library | `query_papers` → `paper_body(id, query=...)` quotes the matching passage with its section and page |
+| Track what you have read | `update_read` (status, 1-5 rating); `state` for the coverage overview |
+| Open the dashboard | Bash: `research dashboard`, then it tells you http://127.0.0.1:7777 is up |
+
+Everything runs against one local SQLite library (default
+`~/.research/research.db`). For a project-private library, point the server at
+a different file once in the host's MCP config (`"args": ["mcp", "--db",
+"./project.research.db"]`, `--db` is a global flag), or have the agent pass
+`--db` on skill/CLI invocations.
+
 ## How your agent uses it
 
 The plugin auto-installs the `research` binary on session start and starts the
@@ -161,6 +178,27 @@ irm https://github.com/epicsagas/research-agent/releases/latest/download/install
 # Homebrew (macOS / Linux)
 brew install epicsagas/tap/research-agent
 ```
+
+### Using the dashboard
+
+Same database, visual side. Launch it from a terminal, browse it in a browser:
+
+```bash
+research dashboard        # then open http://127.0.0.1:7777 (loopback only)
+```
+
+| Screen | What it shows |
+|--------|---------------|
+| Overview | Library size, reading depth, pipeline funnel, topic coverage |
+| Papers | The library table; click a row for details, open the built-in reader for page-anchored bodies or the stored PDF, edit reading status and rating |
+| Pipeline | Where every paper sits from discovered to deep read |
+| History | Reverse-chronological feed of everything that happened |
+| Results | Knowledge gaps and generated reports |
+| Config | Edit `[llm]`, workspace path, dashboard bind settings (token required off loopback) |
+
+Typical loop: check Overview for topic coverage, open Results for the recorded
+gaps, go back to the terminal and aim the next ingest at those gaps, then track
+reading progress under Papers.
 
 ### First-run onboarding
 
@@ -224,6 +262,39 @@ appears in Zotero. Writes pop a per-item confirmation dialog unless you pick
 Every subcommand also accepts a global `--db <path>` flag to use a specific
 database instead of `~/.research/research.db` — useful for isolated or test
 workspaces.
+
+### Example workflows
+
+**Research loop: survey, find gaps, fill them**
+
+```bash
+research init                                          # first run only: sets up DB + LLM settings
+research topics add "Graph DB internals"               # prints the topic ID
+research ingest "latch-free graph database" --topic <TOPIC_ID> --limit 20
+research gaps --topic <TOPIC_ID>                       # what the survey missed
+# aim the next ingest at what the gap analysis flagged:
+research ingest "MVCC snapshot isolation graph store" --topic <TOPIC_ID>
+research status                                        # papers, coverage, gaps per topic
+```
+
+`research gaps` and `research report` use the `[llm]` provider from
+onboarding; without one they return placeholders instead of failing.
+
+**Find something already ingested**
+
+```bash
+research query "latch-free transaction" --evidence     # matches body text, shows section and page
+research read <PAPER_ID> --body                        # dump the stored full text
+research read <PAPER_ID> --status completed --rating 5
+```
+
+**One library per project**
+
+```bash
+research --db ./project.research.db init
+research --db ./project.research.db ingest "your topic" --topic <TOPIC_ID>
+research dashboard --db ./project.research.db
+```
 
 ## Requirements
 

@@ -109,6 +109,17 @@ Hermes 会加载根目录下的 `plugin.yaml` 以及 `__init__.py` 中的 `regis
 - "我当前对 <topic> 的调研覆盖中还存在哪些知识盲区？"
 - "为 <topic> 生成一份文献综述报告"
 
+这些请求在工具层面是这样完成的：
+
+| 您这样提问 | Agent 会这样串联工具 |
+|---------|------------------|
+| 从头到尾调研一个主题 | `init` → `topic_add` → `ingest`（arXiv/S2，关联到主题） → `topic_brief` → Agent 用自身模型分析摘要 → `gaps_record` → 针对已记录的盲区再次 `ingest` → `report_material` → `report_save` |
+| 查找已收录的论文 | `query_papers` → `paper_body(id, query=...)` 引用匹配的段落及其章节、页码 |
+| 跟踪阅读进度 | `update_read`（状态、1-5 评分）；覆盖度概览用 `state` |
+| 打开仪表盘 | Bash：运行 `research dashboard`，然后告诉您 http://127.0.0.1:7777 已启动 |
+
+所有操作都针对同一个本地 SQLite 文献库（默认 `~/.research/research.db`）。如果需要项目专属的文献库，只需在宿主的 MCP 配置中让服务器指向另一个文件（`"args": ["mcp", "--db", "./project.research.db"]`，`--db` 是全局参数），或者让 Agent 在 Skill/CLI 调用时带上 `--db`。
+
 ## Agent 的使用方式
 
 插件会在会话启动时自动安装 `research` 二进制文件并启动 **stdio MCP 服务端**（`research mcp`）—— Agent 会自动发现并直接调用这些工具，无需人工输入 CLI 命令。
@@ -145,6 +156,25 @@ irm https://github.com/epicsagas/research-agent/releases/latest/download/install
 # Homebrew (macOS / Linux)
 brew install epicsagas/tap/research-agent
 ```
+
+### 使用仪表盘
+
+这是同一个数据库的可视化界面。在终端中启动，然后在浏览器中打开：
+
+```bash
+research dashboard        # 启动后访问 http://127.0.0.1:7777（仅限本机回环）
+```
+
+| 界面 | 显示内容 |
+|--------|---------------|
+| Overview | 文献库规模、阅读深度、流水线漏斗、主题覆盖度 |
+| Papers | 文献库表格；点击行查看详情，在内置阅读器中打开带页码定位的正文或已存 PDF，编辑阅读状态和评分 |
+| Pipeline | 每篇论文从发现到精读所处的阶段 |
+| History | 按时间倒序展示发生过的所有事件 |
+| Results | 知识盲区和已生成的报告 |
+| Config | 编辑 `[llm]`、工作区路径、仪表盘绑定设置 |
+
+典型流程：先在 Overview 查看主题覆盖度，再到 Results 查看已记录的盲区，然后回到终端针对这些盲区执行下一轮采集，最后在 Papers 中跟踪阅读进度。
 
 ### 首次运行初始化
 
@@ -189,6 +219,38 @@ research --version
 | `research mcp` | 启动 stdio MCP 服务端（别名: `serve`） |
 
 所有子命令均支持全局 `--db <path>` 参数以指定特定的数据库文件，代替默认的 `~/.research/research.db` — 便于在隔离环境或测试工作区中使用。
+
+### 典型工作流示例
+
+**调研闭环：采集、发现盲区、填补盲区**
+
+```bash
+research init                                          # 仅首次运行：初始化数据库与 LLM 设置
+research topics add "Graph DB internals"               # 会输出主题 ID
+research ingest "latch-free graph database" --topic <TOPIC_ID> --limit 20
+research gaps --topic <TOPIC_ID>                       # 调研中暴露的空白
+# 针对盲区分析指出的问题执行下一轮采集：
+research ingest "MVCC snapshot isolation graph store" --topic <TOPIC_ID>
+research status                                        # 各主题的论文、覆盖度、盲区
+```
+
+`research gaps` 与 `research report` 使用初始化时配置的 `[llm]` 提供商；未配置时会返回占位结果而不是报错。
+
+**查找已采集的内容**
+
+```bash
+research query "latch-free transaction" --evidence     # 连正文一起检索，显示章节和页码
+research read <PAPER_ID> --body                        # 输出已保存的正文全文
+research read <PAPER_ID> --status completed --rating 5
+```
+
+**每个项目一个独立文献库**
+
+```bash
+research --db ./project.research.db init
+research --db ./project.research.db ingest "your topic" --topic <TOPIC_ID>
+research dashboard --db ./project.research.db
+```
 
 ## 运行要求
 

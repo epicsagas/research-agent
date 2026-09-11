@@ -109,6 +109,17 @@ Sobald installiert, können Sie Ihren Agenten beispielsweise Folgendes fragen:
 - "Welche Wissenslücken bestehen noch bei meinem Thema <topic>?"
 - "Erstelle einen Übersichtsbericht für <topic>"
 
+So sehen diese Anfragen auf Tool-Ebene aus:
+
+| Ihre Anfrage | Der Agent verkettet |
+|---------|------------------|
+| Ein Thema von Anfang bis Ende untersuchen | `init` → `topic_add` → `ingest` (arXiv/S2, mit dem Thema verknüpft) → `topic_brief` → der Agent wertet das Briefing mit seinem eigenen Modell aus → `gaps_record` → erneutes `ingest`, gezielt auf die erfassten Lücken → `report_material` → `report_save` |
+| Etwas bereits Erfasstes wiederfinden | `query_papers` → `paper_body(id, query=...)` zitiert die passende Stelle mit Abschnitt und Seite |
+| Lesefortschritt verfolgen | `update_read` (Status, Bewertung 1-5); `state` für die Abdeckungsübersicht |
+| Das Dashboard öffnen | Bash: `research dashboard`, dann meldet es, dass http://127.0.0.1:7777 läuft |
+
+Alles läuft gegen eine einzige lokale SQLite-Bibliothek (Standard `~/.research/research.db`). Für eine projektspezifische Bibliothek richten Sie den Server in der MCP-Konfiguration des Hosts einmalig auf eine andere Datei (`"args": ["mcp", "--db", "./project.research.db"]`, `--db` ist ein globales Flag) oder lassen den Agenten `--db` bei Skill-/CLI-Aufrufen mitgeben.
+
 ## Wie Ihr Agent es nutzt
 
 Das Plugin installiert die `research`-Binärdatei beim Start automatisch und startet den **stdio-MCP-Server** (`research mcp`) — der Agent entdeckt und nutzt die Tools direkt, ohne manuelle CLI-Eingaben.
@@ -145,6 +156,25 @@ irm https://github.com/epicsagas/research-agent/releases/latest/download/install
 # Homebrew (macOS / Linux)
 brew install epicsagas/tap/research-agent
 ```
+
+### Das Dashboard verwenden
+
+Dies ist die visuelle Seite derselben Datenbank. Im Terminal starten, im Browser ansehen:
+
+```bash
+research dashboard        # danach http://127.0.0.1:7777 öffnen (nur Loopback)
+```
+
+| Ansicht | Inhalt |
+|--------|---------------|
+| Overview | Bibliotheksgröße, Lesetiefe, Pipeline-Trichter, Themenabdeckung |
+| Papers | Die Bibliothekstabelle; auf eine Zeile klicken für Details, im integrierten Leser seitenverankerte Volltexte oder gespeicherte PDFs öffnen, Lesestatus und Bewertung bearbeiten |
+| Pipeline | Wo jedes Paper steht, von der Entdeckung bis zur vertieften Lektüre |
+| History | Chronologisch rückwärts laufender Feed aller Ereignisse |
+| Results | Wissenslücken und erstellte Berichte |
+| Config | `[llm]`, Workspace-Pfad und Dashboard-Bindeeinstellungen bearbeiten |
+
+Typischer Umlauf: Themenabdeckung in Overview prüfen, erfasste Lücken in Results ansehen, im Terminal die nächste Erfassung gezielt auf diese Lücken ausrichten, den Lesefortschritt in Papers verfolgen.
 
 ### Onboarding beim ersten Start
 
@@ -189,6 +219,38 @@ research --version
 | `research mcp` | Den stdio-MCP-Server starten (Alias: `serve`) |
 
 Jeder Unterbefehl unterstützt das globale Flag `--db <path>`, um eine bestimmte Datenbankdatei anstelle von `~/.research/research.db` zu verwenden.
+
+### Beispiel-Workflows
+
+**Forschungsschleife: erfassen, Lücken finden, Lücken schließen**
+
+```bash
+research init                                          # nur beim ersten Start: richtet DB + LLM ein
+research topics add "Graph DB internals"               # gibt die Themen-ID aus
+research ingest "latch-free graph database" --topic <TOPIC_ID> --limit 20
+research gaps --topic <TOPIC_ID>                       # was die Recherche offengelegt hat
+# die nächste Erfassung auf das richten, was die Lückenanalyse bemängelt hat:
+research ingest "MVCC snapshot isolation graph store" --topic <TOPIC_ID>
+research status                                        # Paper, Abdeckung und Lücken je Thema
+```
+
+`research gaps` und `research report` verwenden den beim Onboarding konfigurierten `[llm]`-Anbieter; ohne einen liefern sie einen Platzhalter zurück, statt zu scheitern.
+
+**Etwas bereits Erfasstes wiederfinden**
+
+```bash
+research query "latch-free transaction" --evidence     # sucht bis in den Volltext, zeigt Abschnitt und Seite
+research read <PAPER_ID> --body                        # gibt den gespeicherten Volltext aus
+research read <PAPER_ID> --status completed --rating 5
+```
+
+**Eine Bibliothek pro Projekt**
+
+```bash
+research --db ./project.research.db init
+research --db ./project.research.db ingest "your topic" --topic <TOPIC_ID>
+research dashboard --db ./project.research.db
+```
 
 ## Voraussetzungen
 

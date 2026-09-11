@@ -109,6 +109,17 @@ Une fois installé, demandez par exemple à votre agent :
 - "Quelles lacunes de connaissances subsistent dans ma couverture de <topic> ?"
 - "Génère un rapport de synthèse pour <topic>"
 
+Voici comment ces demandes se traduisent au niveau des outils :
+
+| Vous demandez | L'agent enchaîne |
+|---------|------------------|
+| Explorer un thème de bout en bout | `init` → `topic_add` → `ingest` (arXiv/S2, lié au thème) → `topic_brief` → l'agent raisonne sur le briefing avec son propre modèle → `gaps_record` → nouvel `ingest` ciblé sur les lacunes enregistrées → `report_material` → `report_save` |
+| Retrouver quelque chose de déjà ingéré | `query_papers` → `paper_body(id, query=...)` cite le passage correspondant avec sa section et sa page |
+| Suivre vos lectures | `update_read` (statut, note de 1 à 5) ; `state` pour la vue d'ensemble de la couverture |
+| Ouvrir le tableau de bord | Bash : `research dashboard`, puis il vous signale que http://127.0.0.1:7777 est lancé |
+
+Tout s'exécute contre une seule bibliothèque SQLite locale (par défaut `~/.research/research.db`). Pour une bibliothèque propre à un projet, faites pointer le serveur vers un autre fichier dans la configuration MCP de l'hôte (`"args": ["mcp", "--db", "./project.research.db"]`, `--db` est une option globale), ou faites passer `--db` par l'agent dans ses invocations skill/CLI.
+
 ## Comment votre agent l'utilise
 
 Le plugin installe automatiquement le binaire `research` au démarrage de la session et lance le **serveur MCP stdio** (`research mcp`) — l'agent découvre et appelle directement les outils, sans intervention humaine en ligne de commande.
@@ -145,6 +156,25 @@ irm https://github.com/epicsagas/research-agent/releases/latest/download/install
 # Homebrew (macOS / Linux)
 brew install epicsagas/tap/research-agent
 ```
+
+### Utiliser le tableau de bord
+
+C'est la face visuelle de la même base de données. Lancez-le depuis un terminal, consultez-le dans le navigateur :
+
+```bash
+research dashboard        # puis ouvrez http://127.0.0.1:7777 (loopback uniquement)
+```
+
+| Écran | Contenu |
+|--------|---------------|
+| Overview | Taille de la bibliothèque, profondeur de lecture, entonnoir du pipeline, couverture par thème |
+| Papers | La table de la bibliothèque ; cliquez sur une ligne pour le détail, ouvrez le lecteur intégré (corps avec pages repérées ou PDF stocké), modifiez le statut de lecture et la note |
+| Pipeline | Où se situe chaque article, de la découverte à la lecture approfondie |
+| History | Flux chronologique inversé de tout ce qui s'est passé |
+| Results | Lacunes de connaissances et rapports générés |
+| Config | Éditer `[llm]`, le chemin de l'espace de travail et les paramètres d'écoute du tableau de bord |
+
+Boucle habituelle : vérifiez la couverture des thèmes dans Overview, consultez les lacunes enregistrées dans Results, revenez au terminal pour cibler la prochaine ingestion sur ces lacunes, puis suivez l'avancement de lecture dans Papers.
 
 ### Premier lancement et configuration
 
@@ -189,6 +219,38 @@ research --version
 | `research mcp` | Démarre le serveur MCP stdio (alias : `serve`) |
 
 Toutes les sous-commandes acceptent l'option globale `--db <path>` pour désigner une base de données spécifique à la place de `~/.research/research.db` — très pratique pour les environnements de test ou isolés.
+
+### Exemples de flux de travail
+
+**Boucle de recherche : ingérer, repérer les lacunes, les combler**
+
+```bash
+research init                                          # premier lancement uniquement : configure la BD + le LLM
+research topics add "Graph DB internals"               # affiche l'identifiant du thème
+research ingest "latch-free graph database" --topic <TOPIC_ID> --limit 20
+research gaps --topic <TOPIC_ID>                       # ce que l'exploration a laissé entrevoir
+# ciblez l'ingestion suivante sur ce qu'a signalé l'analyse des lacunes :
+research ingest "MVCC snapshot isolation graph store" --topic <TOPIC_ID>
+research status                                        # articles, couverture et lacunes par thème
+```
+
+`research gaps` et `research report` utilisent le fournisseur `[llm]` défini lors de la configuration initiale ; sans lui, ils renvoient un résultat indicative au lieu d'échouer.
+
+**Retrouver quelque chose de déjà ingéré**
+
+```bash
+research query "latch-free transaction" --evidence     # cherche jusque dans le corps, affiche section et page
+research read <PAPER_ID> --body                        # affiche le corps de texte complet stocké
+research read <PAPER_ID> --status completed --rating 5
+```
+
+**Une bibliothèque par projet**
+
+```bash
+research --db ./project.research.db init
+research --db ./project.research.db ingest "your topic" --topic <TOPIC_ID>
+research dashboard --db ./project.research.db
+```
 
 ## Prérequis
 

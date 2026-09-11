@@ -109,6 +109,17 @@ Una vez instalado, puede pedirle a su agente cosas como:
 - "¿Qué brechas de conocimiento quedan en mi cobertura de <topic>?"
 - "Genera un informe de revisión sobre <topic>"
 
+Así se resuelven estas peticiones a nivel de herramientas:
+
+| Usted pide | El agente encadena |
+|---------|------------------|
+| Investigar un tema de principio a fin | `init` → `topic_add` → `ingest` (arXiv/S2, vinculado al tema) → `topic_brief` → el agente razona sobre el resumen con su propio modelo → `gaps_record` → `ingest` de nuevo, apuntando a las brechas registradas → `report_material` → `report_save` |
+| Encontrar algo ya recopilado | `query_papers` → `paper_body(id, query=...)` cita el pasaje coincidente con su sección y página |
+| Hacer seguimiento de lecturas | `update_read` (estado, calificación 1-5); `state` para la vista general de cobertura |
+| Abrir el panel | Bash: `research dashboard` y luego le avisa que http://127.0.0.1:7777 está activo |
+
+Todo funciona contra una única biblioteca SQLite local (por defecto `~/.research/research.db`). Para una biblioteca privada de un proyecto, haga que el servidor apunte a otro archivo en la configuración MCP del host (`"args": ["mcp", "--db", "./project.research.db"]`; `--db` es una opción global), o que el agente pase `--db` en las invocaciones por skill/CLI.
+
 ## Cómo lo utiliza su agente
 
 El plugin instala automáticamente el binario `research` al inicio de la sesión e inicia el **servidor MCP stdio** (`research mcp`) — el agente descubre y llama a las herramientas directamente, sin que un humano tenga que escribir comandos de CLI.
@@ -145,6 +156,25 @@ irm https://github.com/epicsagas/research-agent/releases/latest/download/install
 # Homebrew (macOS / Linux)
 brew install epicsagas/tap/research-agent
 ```
+
+### Uso del panel (dashboard)
+
+Es la cara visual de la misma base de datos. Láncealo desde el terminal y ábralo en el navegador:
+
+```bash
+research dashboard        # después abra http://127.0.0.1:7777 (solo en bucle local)
+```
+
+| Panel | Qué muestra |
+|--------|---------------|
+| Overview | Tamaño de la biblioteca, profundidad de lectura, embudo del flujo, cobertura por tema |
+| Papers | La tabla de la biblioteca; haga clic en una fila para ver detalles, abra el lector integrado con cuerpos anclados por página o el PDF almacenado, edite el estado de lectura y la calificación |
+| Pipeline | En qué punto está cada artículo, desde descubierto hasta leído a fondo |
+| History | Crónica inversa de todo lo que ha ocurrido |
+| Results | Brechas de conocimiento e informes generados |
+| Config | Editar `[llm]`, ruta del espacio de trabajo y ajustes de enlace del panel |
+
+Flujo típico: revise la cobertura en Overview, mire las brechas registradas en Results, vuelva al terminal para lanzar la siguiente recopilación apuntando a esas brechas y siga el progreso de lectura en Papers.
 
 ### Configuración inicial
 
@@ -189,6 +219,38 @@ research --version
 | `research mcp` | Inicia el servidor MCP stdio (alias: `serve`) |
 
 Cada subcomando acepta también la opción global `--db <path>` para usar una base de datos específica en lugar de `~/.research/research.db` — ideal para espacios de prueba o entornos aislados.
+
+### Flujos de trabajo de ejemplo
+
+**Bucle de investigación: recopilar, detectar brechas, cerrarlas**
+
+```bash
+research init                                          # solo la primera vez: configura la BD y el LLM
+research topics add "Graph DB internals"               # imprime el ID del tema
+research ingest "latch-free graph database" --topic <TOPIC_ID> --limit 20
+research gaps --topic <TOPIC_ID>                       # lo que la revisión dejó al descubierto
+# apunte la siguiente recopilación a lo que señaló el análisis de brechas:
+research ingest "MVCC snapshot isolation graph store" --topic <TOPIC_ID>
+research status                                        # artículos, cobertura y brechas por tema
+```
+
+`research gaps` y `research report` usan el proveedor `[llm]` configurado en la instalación inicial; sin uno, devuelven un marcador de posición en lugar de fallar.
+
+**Encontrar algo ya recopilado**
+
+```bash
+research query "latch-free transaction" --evidence     # busca también en el cuerpo, muestra sección y página
+research read <PAPER_ID> --body                        # vuelca el texto completo almacenado
+research read <PAPER_ID> --status completed --rating 5
+```
+
+**Una biblioteca por proyecto**
+
+```bash
+research --db ./project.research.db init
+research --db ./project.research.db ingest "your topic" --topic <TOPIC_ID>
+research dashboard --db ./project.research.db
+```
 
 ## Requisitos
 

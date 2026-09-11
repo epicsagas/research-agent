@@ -109,6 +109,17 @@ Hermes는 루트 `plugin.yaml`과 `__init__.py`의 `register(ctx)`를 로드합�
 - "내 <topic> 커버리지에 어떤 지식 공백이 남아 있어?"
 - "<topic>에 대한 서베이 리포트를 생성해 줘"
 
+이 요청들이 도구 수준에서 어떻게 처리되는지 보면:
+
+| 이렇게 요청하면 | 에이전트는 도구를 이렇게 엮습니다 |
+|---------|------------------|
+| 토픽을 처음부터 끝까지 조사 | `init` → `topic_add` → `ingest`(arXiv/S2, 토픽에 연결) → `topic_brief` → 에이전트가 자체 모델로 브리프를 분석 → `gaps_record` → 기록된 공백을 겨냥해 다시 `ingest` → `report_material` → `report_save` |
+| 이미 모아둔 논문 찾기 | `query_papers` → `paper_body(id, query=...)` 해당 구절을 섹션·페이지와 함께 인용 |
+| 읽은 것 추적 | `update_read`(상태, 1-5 평점); 커버리지 개요는 `state` |
+| 대시보드 띄우기 | Bash: `research dashboard` 실행 후 http://127.0.0.1:7777 이 떴다고 알려 줌 |
+
+모든 작업은 로컬 SQLite 라이브러리 하나(기본값 `~/.research/research.db`)에서 이뤄집니다. 프로젝트 전용 라이브러리가 필요하면 호스트의 MCP 설정에서 서버가 다른 파일을 가리키게 하면 됩니다(`"args": ["mcp", "--db", "./project.research.db"]`, `--db`는 전역 플래그). 아니면 에이전트가 스킬/CLI 호출에 `--db`를 붙이게 해도 됩니다.
+
 ## 에이전트의 구동 방식
 
 플러그인은 세션 시작 시 `research` 바이너리를 자동 설치하고 **stdio MCP 서버**(`research mcp`)를 실행합니다. 에이전트가 도구를 직접 검색하고 호출하므로 사용자가 직접 CLI 명령을 입력할 필요가 없습니다.
@@ -145,6 +156,25 @@ irm https://github.com/epicsagas/research-agent/releases/latest/download/install
 # Homebrew (macOS / Linux)
 brew install epicsagas/tap/research-agent
 ```
+
+### 대시보드 사용하기
+
+같은 데이터베이스를 보여 주는 화면입니다. 터미널에서 띄우고 브라우저로 보세요:
+
+```bash
+research dashboard        # 실행 후 http://127.0.0.1:7777 접속 (루프백 전용)
+```
+
+| 화면 | 보여 주는 것 |
+|--------|---------------|
+| Overview | 라이브러리 규모, 읽기 깊이, 파이프라인 퍼널, 토픽 커버리지 |
+| Papers | 라이브러리 테이블. 행을 클릭하면 상세 보기, 내장 리더로 페이지 단위 본문이나 저장된 PDF 열람, 읽기 상태와 평점 수정 |
+| Pipeline | 발견부터 정독까지 각 논문이 어디쯤 와 있는지 |
+| History | 지금까지 일어난 일의 최신순 피드 |
+| Results | 지식 공백과 생성된 리포트 |
+| Config | `[llm]`, 워크스페이스 경로, 대시보드 바인드 설정 편집 |
+
+일반적인 흐름: Overview에서 토픽 커버리지를 확인하고, Results에서 기록된 공백을 살펴본 뒤, 터미널로 돌아가 그 공백을 겨냥해 다음 수집을 돌리고, Papers에서 읽기 진행 상황을 추적합니다.
 
 ### 최초 실행 온보딩
 
@@ -189,6 +219,38 @@ research --version
 | `research mcp` | stdio MCP 서버 시작 (별칭: `serve`) |
 
 모든 하위 명령은 전역 플래그 `--db <path>`를 지원하여 `~/.research/research.db` 대신 특정 데이터베이스를 지정할 수 있습니다(격리된 작업 공간이나 테스트 환경에 유용).
+
+### 활용 워크플로 예시
+
+**조사 루프: 수집하고, 공백을 찾고, 메우기**
+
+```bash
+research init                                          # 최초 1회: DB + LLM 설정
+research topics add "Graph DB internals"               # 토픽 ID가 출력됩니다
+research ingest "latch-free graph database" --topic <TOPIC_ID> --limit 20
+research gaps --topic <TOPIC_ID>                       # 조사에서 비친 구멍
+# 공백 분석이 짚어 준 부분을 겨냥해 다음 수집을 돌립니다:
+research ingest "MVCC snapshot isolation graph store" --topic <TOPIC_ID>
+research status                                        # 토픽별 논문·커버리지·공백
+```
+
+`research gaps`와 `research report`는 온보딩에서 설정한 `[llm]` 제공자를 사용합니다. 설정이 없으면 실패 대신 placeholder를 반환합니다.
+
+**이미 수집된 것 찾기**
+
+```bash
+research query "latch-free transaction" --evidence     # 본문까지 검색, 섹션·페이지 표시
+research read <PAPER_ID> --body                        # 저장된 본문 전문 출력
+research read <PAPER_ID> --status completed --rating 5
+```
+
+**프로젝트별 라이브러리**
+
+```bash
+research --db ./project.research.db init
+research --db ./project.research.db ingest "your topic" --topic <TOPIC_ID>
+research dashboard --db ./project.research.db
+```
 
 ## 요구 사항
 

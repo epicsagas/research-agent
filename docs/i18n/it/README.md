@@ -109,6 +109,17 @@ Una volta installato, potete chiedere all'agente cose come:
 - "Quali lacune di conoscenza rimangono nella mia copertura di <topic>?"
 - "Genera un report di revisione per <topic>"
 
+Ecco come queste richieste si traducono a livello di strumenti:
+
+| Voi chiedete | L'agente concatena |
+|---------|------------------|
+| Esplorare un argomento dall'inizio alla fine | `init` → `topic_add` → `ingest` (arXiv/S2, collegato all'argomento) → `topic_brief` → l'agente ragiona sul quadro con il proprio modello → `gaps_record` → un nuovo `ingest` mirato sulle lacune registrate → `report_material` → `report_save` |
+| Trovare qualcosa di già raccolto | `query_papers` → `paper_body(id, query=...)` cita il passaggio corrispondente con sezione e pagina |
+| Tenere traccia delle letture | `update_read` (stato, valutazione 1-5); `state` per la panoramica della copertura |
+| Aprire la dashboard | Bash: `research dashboard`, poi vi segnala che http://127.0.0.1:7777 è attivo |
+
+Tutto opera su un'unica libreria SQLite locale (predefinita `~/.research/research.db`). Per una libreria dedicata a un progetto, puntate il server su un file diverso nella configurazione MCP dell'host (`"args": ["mcp", "--db", "./project.research.db"]`, `--db` è un flag globale), oppure fate passare `--db` all'agente nelle invocazioni skill/CLI.
+
 ## Come lo usa il vostro agente
 
 Il plugin installa automaticamente il binario `research` all'inizio della sessione e avvia il **server MCP stdio** (`research mcp`) — l'agente rileva e invoca direttamente gli strumenti, senza necessità di digitare comandi da terminale.
@@ -145,6 +156,25 @@ irm https://github.com/epicsagas/research-agent/releases/latest/download/install
 # Homebrew (macOS / Linux)
 brew install epicsagas/tap/research-agent
 ```
+
+### Uso della dashboard
+
+È il lato visivo dello stesso database. Avviatelo da terminale e consultatelo dal browser:
+
+```bash
+research dashboard        # poi aprite http://127.0.0.1:7777 (solo in loopback)
+```
+
+| Schermata | Cosa mostra |
+|--------|---------------|
+| Overview | Dimensione della libreria, profondità di lettura, funnel della pipeline, copertura per argomento |
+| Papers | La tabella della libreria; cliccate su una riga per i dettagli, aprite il lettore integrato con testi ancorati alla pagina o il PDF salvato, modificate stato di lettura e valutazione |
+| Pipeline | A che punto si trova ogni articolo, dalla scoperta alla lettura approfondita |
+| History | Flusso cronologico inverso di tutto ciò che è successo |
+| Results | Lacune di conoscenza e report generati |
+| Config | Modifica di `[llm]`, percorso del workspace e impostazioni di binding della dashboard |
+
+Ciclo tipico: controllate la copertura degli argomenti in Overview, esaminate le lacune registrate in Results, tornate al terminale per puntare la prossima raccolta su quelle lacune, poi seguite l'avanzamento della lettura in Papers.
 
 ### Configurazione guidata al primo avvio
 
@@ -189,6 +219,38 @@ research --version
 | `research mcp` | Avvia il server MCP stdio (alias: `serve`) |
 
 Tutti i sottocomandi supportano il flag globale `--db <path>` per usare un database specifico al posto di `~/.research/research.db` — ideale per ambienti di test o isolati.
+
+### Esempi di flussi di lavoro
+
+**Ciclo di ricerca: raccogliere, individuare le lacune, colmarle**
+
+```bash
+research init                                          # solo al primo avvio: configura DB + LLM
+research topics add "Graph DB internals"               # stampa l'ID dell'argomento
+research ingest "latch-free graph database" --topic <TOPIC_ID> --limit 20
+research gaps --topic <TOPIC_ID>                       # ciò che l'esplorazione ha lasciato intravedere
+# puntate la raccolta successiva su ciò che l'analisi delle lacune ha segnalato:
+research ingest "MVCC snapshot isolation graph store" --topic <TOPIC_ID>
+research status                                        # articoli, copertura e lacune per argomento
+```
+
+`research gaps` e `research report` usano il provider `[llm]` configurato alla prima configurazione; senza, restituiscono un segnaposto invece di fallire.
+
+**Trovare qualcosa di già raccolto**
+
+```bash
+research query "latch-free transaction" --evidence     # cerca fino nel corpo del testo, mostra sezione e pagina
+research read <PAPER_ID> --body                        # stampa il testo completo archiviato
+research read <PAPER_ID> --status completed --rating 5
+```
+
+**Una libreria per progetto**
+
+```bash
+research --db ./project.research.db init
+research --db ./project.research.db ingest "your topic" --topic <TOPIC_ID>
+research dashboard --db ./project.research.db
+```
 
 ## Requisiti
 

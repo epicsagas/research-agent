@@ -109,6 +109,17 @@ Hermes はルートの `plugin.yaml` と `__init__.py` の `register(ctx)` を�
 - "私の <topic> カバレッジに残っている知識のギャップは何？"
 - "<topic> に関するサーベイ レポートを生成して"
 
+これらの要求がツールレベルでどのように処理されるかを示します:
+
+| こう依頼すると | エージェントはツールをこう組み合わせます |
+|---------|------------------|
+| トピックを最初から最後まで調査 | `init` → `topic_add` → `ingest`（arXiv/S2、トピックに紐付け） → `topic_brief` → エージェントが独自モデルでブリーフを分析 → `gaps_record` → 記録されたギャップを狙って再度 `ingest` → `report_material` → `report_save` |
+| すでに集めた論文を探す | `query_papers` → `paper_body(id, query=...)` 該当箇所をセクション・ページ付きで引用 |
+| 読んだものを追跡 | `update_read`（ステータス、1-5 評価）。カバレッジ概要は `state` |
+| ダッシュボードを開く | Bash: `research dashboard` を実行し、http://127.0.0.1:7777 が起動したと伝える |
+
+すべての操作は 1 つのローカル SQLite ライブラリ（デフォルト `~/.research/research.db`）に対して行われます。プロジェクト専用ライブラリが必要な場合は、ホストの MCP 設定でサーバーに別のファイルを指定します（`"args": ["mcp", "--db", "./project.research.db"]`。`--db` はグローバルフラグです）。あるいは、エージェントにスキル/CLI 呼び出しで `--db` を付けさせても構いません。
+
 ## エージェントによる利用方法
 
 プラグインはセッション開始時に `research` バイナリを自動インストールし、**stdio MCP サーバー**（`research mcp`）を起動します。エージェントがツールを直接検出して呼び出すため、人間が CLI コマンドを入力する必要はありません。
@@ -145,6 +156,25 @@ irm https://github.com/epicsagas/research-agent/releases/latest/download/install
 # Homebrew (macOS / Linux)
 brew install epicsagas/tap/research-agent
 ```
+
+### ダッシュボードの利用
+
+同じデータベースを可視化した画面です。ターミナルで起動し、ブラウザで開いてください:
+
+```bash
+research dashboard        # 起動後 http://127.0.0.1:7777 にアクセス（ループバック限定）
+```
+
+| 画面 | 表示内容 |
+|--------|---------------|
+| Overview | ライブラリの規模、読書の深さ、パイプラインのファネル、トピック別カバレッジ |
+| Papers | ライブラリのテーブル。行をクリックして詳細を表示、内蔵リーダーでページ位置付き本文や保存済み PDF を開く、読書ステータスと評価を編集 |
+| Pipeline | 発見から精読まで、各論文がどの段階にいるか |
+| History | これまでの出来事を新しい順に並べたフィード |
+| Results | 知識ギャップと生成済みレポート |
+| Config | `[llm]`、ワークスペースパス、ダッシュボードのバインド設定を編集 |
+
+典型的な流れ: Overview でトピック カバレッジを確認し、Results で記録されたギャップを眺め、ターミナルに戻ってそのギャップを狙った次の取り込みを実行し、Papers で読書進捗を追跡します。
 
 ### 初回実行オンボーディング
 
@@ -189,6 +219,38 @@ research --version
 | `research mcp` | stdio MCP サーバーを起動（エイリアス: `serve`） |
 
 すべてのサブコマンドはグローバルフラグ `--db <path>` を受け入れ、`~/.research/research.db` の代わりに特定のデータベースを使用できます（分離された環境やテストワークスペースに便利です）。
+
+### ワークフロー例
+
+**調査ループ: 取り込み、ギャップの発見、ギャップを埋める**
+
+```bash
+research init                                          # 初回のみ: DB + LLM 設定
+research topics add "Graph DB internals"               # トピック ID が出力されます
+research ingest "latch-free graph database" --topic <TOPIC_ID> --limit 20
+research gaps --topic <TOPIC_ID>                       # 調査で見えた抜け
+# ギャップ分析が指摘した点を狙って次の取り込みを実行します:
+research ingest "MVCC snapshot isolation graph store" --topic <TOPIC_ID>
+research status                                        # トピック別の論文・カバレッジ・ギャップ
+```
+
+`research gaps` と `research report` はオンボーディングで設定した `[llm]` プロバイダーを使用します。未設定の場合は失敗ではなくプレースホルダを返します。
+
+**すでに取り込んだものを探す**
+
+```bash
+research query "latch-free transaction" --evidence     # 本文まで検索、セクション・ページを表示
+research read <PAPER_ID> --body                        # 保存済み本文の全文を出力
+research read <PAPER_ID> --status completed --rating 5
+```
+
+**プロジェクトごとのライブラリ**
+
+```bash
+research --db ./project.research.db init
+research --db ./project.research.db ingest "your topic" --topic <TOPIC_ID>
+research dashboard --db ./project.research.db
+```
 
 ## システム要件
 

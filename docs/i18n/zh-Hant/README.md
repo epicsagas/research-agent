@@ -109,6 +109,17 @@ Hermes 會載入根目錄下的 `plugin.yaml` 與 `__init__.py` 中的 `register
 - "我目前對 <topic> 的研究覆蓋中還缺少哪些知識？"
 - "為 <topic> 產出一份文獻綜述報告"
 
+這些請求在工具層面是這樣完成的：
+
+| 您這樣請求 | Agent 會這樣串聯工具 |
+|---------|------------------|
+| 從頭到尾調研一個主題 | `init` → `topic_add` → `ingest`（arXiv/S2，關聯至主題） → `topic_brief` → Agent 以自身模型分析摘要 → `gaps_record` → 針對已記錄的缺口再次 `ingest` → `report_material` → `report_save` |
+| 查找已收錄的論文 | `query_papers` → `paper_body(id, query=...)` 引用相符的段落及其章節、頁碼 |
+| 追蹤閱讀進度 | `update_read`（狀態、1-5 評分）；覆蓋率總覽用 `state` |
+| 開啟儀表板 | Bash：執行 `research dashboard`，然後告知您 http://127.0.0.1:7777 已啟動 |
+
+所有操作都針對同一個本機 SQLite 文庫（預設 `~/.research/research.db`）。若需要專案專屬的文庫，只要在宿主的 MCP 設定中讓伺服器指向另一個檔案（`"args": ["mcp", "--db", "./project.research.db"]`，`--db` 是全域參數），或讓 Agent 在 Skill/CLI 呼叫時附上 `--db`。
+
 ## Agent 的使用方式
 
 外掛程式會在工作階段啟動時自動安裝 `research` 二進位檔並啟動 **stdio MCP 伺服端**（`research mcp`）—— Agent 會自動探索並直接呼叫工具，使用者無需手動輸入 CLI 指令。
@@ -145,6 +156,25 @@ irm https://github.com/epicsagas/research-agent/releases/latest/download/install
 # Homebrew (macOS / Linux)
 brew install epicsagas/tap/research-agent
 ```
+
+### 使用儀表板
+
+這是同一個資料庫的視覺化介面。在終端機啟動，再於瀏覽器開啟：
+
+```bash
+research dashboard        # 啟動後前往 http://127.0.0.1:7777（僅限本機回環）
+```
+
+| 畫面 | 顯示內容 |
+|--------|---------------|
+| Overview | 文庫規模、閱讀深度、管線漏斗、主題覆蓋率 |
+| Papers | 文庫表格；點選列檢視詳情，於內建閱讀器開啟附頁碼定位的內文或已存 PDF，編輯閱讀狀態與評分 |
+| Pipeline | 每篇論文從發現到精讀所處的階段 |
+| History | 以時間倒序呈現發生過的所有事件 |
+| Results | 知識缺口與已產出的報告 |
+| Config | 編輯 `[llm]`、工作區路徑、儀表板綁定設定 |
+
+常見流程：先在 Overview 檢視主題覆蓋率，再到 Results 查看已記錄的缺口，接著回到終端機針對這些缺口執行下一輪擷取，最後在 Papers 追蹤閱讀進度。
 
 ### 首次執行引導
 
@@ -189,6 +219,38 @@ research --version
 | `research mcp` | 啟動 stdio MCP 伺服端（別名: `serve`） |
 
 所有子指令皆支援全域 `--db <path>` 參數，可指定特定的資料庫檔案代替預設的 `~/.research/research.db` — 適合用於隔離環境或測試工作區。
+
+### 典型工作流程範例
+
+**調研循環：擷取、找出缺口、補齊缺口**
+
+```bash
+research init                                          # 僅首次執行：初始化資料庫與 LLM 設定
+research topics add "Graph DB internals"               # 會輸出主題 ID
+research ingest "latch-free graph database" --topic <TOPIC_ID> --limit 20
+research gaps --topic <TOPIC_ID>                       # 調研中浮現的空白
+# 針對缺口分析指出的部分執行下一輪擷取：
+research ingest "MVCC snapshot isolation graph store" --topic <TOPIC_ID>
+research status                                        # 各主題的論文、覆蓋率、缺口
+```
+
+`research gaps` 與 `research report` 使用引導時設定的 `[llm]` 供應商；未設定時會回傳佔位結果而非報錯。
+
+**查找已擷取的內容**
+
+```bash
+research query "latch-free transaction" --evidence     # 連內文一起檢索，顯示章節與頁碼
+research read <PAPER_ID> --body                        # 輸出已儲存的內文全文
+research read <PAPER_ID> --status completed --rating 5
+```
+
+**每個專案一個獨立文庫**
+
+```bash
+research --db ./project.research.db init
+research --db ./project.research.db ingest "your topic" --topic <TOPIC_ID>
+research dashboard --db ./project.research.db
+```
 
 ## 系統需求
 
