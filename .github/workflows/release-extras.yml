@@ -82,4 +82,6 @@ jobs:
           fi
           git add Formula/research-agent.rb
           git commit -m "research-agent ${version}"
+          # another run may have updated the tap while this one polled
+          git pull --rebase origin
           git push
