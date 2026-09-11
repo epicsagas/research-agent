@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use quick_xml::Reader;
 use quick_xml::events::Event;
 
+use crate::adapters::semantic_scholar_source::percent_encode;
 use crate::domain::paper::Paper;
 use crate::error::{ResearchError, Result};
 use crate::ports::paper_source::PaperSource;
@@ -49,7 +50,7 @@ impl Default for ArxivSource {
 #[async_trait]
 impl PaperSource for ArxivSource {
     async fn fetch_papers(&self, query: &str, limit: usize) -> Result<Vec<Paper>> {
-        let encoded = query.replace(' ', "+");
+        let encoded = percent_encode(query);
         let url = format!(
             "https://export.arxiv.org/api/query?search_query=all:{}&max_results={}",
             encoded, limit

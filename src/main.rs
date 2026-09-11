@@ -663,7 +663,14 @@ async fn download_arxiv_bodies(
         match pdf.extract_body(&bytes, arxiv_id) {
             Ok(Some(body)) => {
                 std::fs::create_dir_all(pdf_dir)?;
-                let path = pdf_dir.join(format!("{arxiv_id}.pdf"));
+                // The id comes from the network (arXiv feed or S2 externalIds);
+                // keep filename-safe characters only so path separators or
+                // traversal sequences cannot escape pdf_dir.
+                let safe_id: String = arxiv_id
+                    .chars()
+                    .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+                    .collect();
+                let path = pdf_dir.join(format!("{safe_id}.pdf"));
                 std::fs::write(&path, &bytes)?;
                 store.set_paper_pdf_path(
                     &paper.id,

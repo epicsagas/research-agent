@@ -7,8 +7,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/registry/scripts/install.js\"",
-            "async": false
+            "command": "command -v node >/dev/null 2>&1 && node \"${CLAUDE_PLUGIN_ROOT}/registry/scripts/install.js\" || exit 0",
+            "async": false,
+            "timeout": 300
           }
         ]
       }

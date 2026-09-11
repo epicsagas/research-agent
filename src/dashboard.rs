@@ -298,7 +298,7 @@ async fn handle_conn(
 fn authed_for_models(ctx: &RouteCtx) -> bool {
     match &ctx.token {
         None => true,
-        Some(required) => request_token(ctx).is_some_and(|t| &t == required),
+        Some(required) => request_token(ctx).is_some_and(|t| ct_eq(&t, required)),
     }
 }
 
@@ -382,7 +382,7 @@ async fn write_response(stream: &mut TcpStream, response: &Response) -> anyhow::
         .as_ref()
         .map_or(response.body.len(), |b| b.len());
     let http = format!(
-        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: SAMEORIGIN\r\n{cookie}Connection: close\r\n\r\n",
+        "HTTP/1.1 {} {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: SAMEORIGIN\r\nContent-Security-Policy: default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src https://cdn.jsdelivr.net; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'\r\n{cookie}Connection: close\r\n\r\n",
         response.status, reason, response.content_type, body_len
     );
     stream.write_all(http.as_bytes()).await?;
@@ -427,7 +427,7 @@ fn route(method: &str, raw_path: &str, body: Option<&str>, ctx: &RouteCtx) -> Re
     // only unauthenticated surfaces.
     let authed = match &ctx.token {
         None => true,
-        Some(required) => request_token(ctx).is_some_and(|t| &t == required),
+        Some(required) => request_token(ctx).is_some_and(|t| ct_eq(&t, required)),
     };
     if !authed {
         let result = match (method, path) {
@@ -676,6 +676,18 @@ fn request_token(ctx: &RouteCtx) -> Option<String> {
             pair.strip_prefix("dashboard_token=").map(str::to_string)
         })
     })
+}
+
+/// Constant-time equality so token checks don't leak the token byte-by-byte
+/// through response timing.
+fn ct_eq(a: &str, b: &str) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.bytes()
+        .zip(b.bytes())
+        .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+        == 0
 }
 
 /// Exchange the shared token for a session cookie so browser navigation can

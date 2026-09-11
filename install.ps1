@@ -7,6 +7,9 @@ param(
 $Repo   = "epicsagas/research-agent"
 $Binary = "research"
 
+# TLS 1.2 for older Windows PowerShell 5.1 builds (no-op on PS 7+).
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+
 # ── Detect architecture ───────────────────────────────────────────────────────
 $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
 if ($arch -eq "X64") {
@@ -29,11 +32,12 @@ $shaUrl  = "$baseUrl/$archive.sha256"
 Write-Host "Installing $Binary v$version for $target..."
 
 $tmpdir = New-Item -ItemType Directory -Path (Join-Path $env:TEMP "research-install-$pid") -Force
+try {
 $zip    = Join-Path $tmpdir $archive
 $shaFile = Join-Path $tmpdir "$archive.sha256"
 
-Invoke-WebRequest -Uri $url    -OutFile $zip     -UseBasicParsing
-Invoke-WebRequest -Uri $shaUrl -OutFile $shaFile -UseBasicParsing
+Invoke-WebRequest -Uri $url    -OutFile $zip     -UseBasicParsing -TimeoutSec 300
+Invoke-WebRequest -Uri $shaUrl -OutFile $shaFile -UseBasicParsing -TimeoutSec 60
 
 # SHA-256 verification
 $expected = (Get-Content $shaFile -Raw).Split(" ")[0].Trim()
@@ -52,7 +56,9 @@ if (-not (Test-Path $InstallDir)) {
 $exe = Get-ChildItem -Path $tmpdir -Recurse -Filter "$Binary.exe" | Select-Object -First 1
 if (-not $exe) { Write-Error "Error: $Binary.exe not found in archive"; exit 1 }
 Copy-Item -Path $exe.FullName -Destination (Join-Path $InstallDir "$Binary.exe") -Force
-Remove-Item -Path $tmpdir -Recurse -Force
+} finally {
+    Remove-Item -Path $tmpdir -Recurse -Force -ErrorAction SilentlyContinue
+}
 
 # ── Verify ───────────────────────────────────────────────────────────────────
 if (Get-Command $Binary -ErrorAction SilentlyContinue) {

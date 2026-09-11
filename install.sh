@@ -21,7 +21,7 @@ case "${os}-${arch}" in
 esac
 
 # ── Resolve latest version ────────────────────────────────────────────────────
-version="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
+version="$(curl --connect-timeout 10 --max-time 60 -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
     | grep '"tag_name"' | head -1 | sed 's/.*"v\(.*\)".*/\1/')"
 if [ -z "${version}" ]; then
     echo "Error: could not determine latest version" >&2
@@ -39,8 +39,8 @@ trap 'rm -rf "${tmpdir}"' EXIT
 
 echo "Installing ${BINARY} v${version} for ${target}..."
 
-curl -fsSL "${url}"     -o "${tmpdir}/${archive}"
-curl -fsSL "${sha_url}" -o "${tmpdir}/${archive}.sha256"
+curl --connect-timeout 10 --max-time 300 -fsSL "${url}"     -o "${tmpdir}/${archive}"
+curl --connect-timeout 10 --max-time 60 -fsSL "${sha_url}" -o "${tmpdir}/${archive}.sha256"
 
 # SHA-256 verification
 (cd "${tmpdir}" && sha256sum -c "${archive}.sha256" 2>/dev/null \
