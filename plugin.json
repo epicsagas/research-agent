@@ -8,5 +8,6 @@
   },
   "homepage": "https://github.com/epicsagas/research-agent",
   "repository": "https://github.com/epicsagas/research-agent",
-  "license": "apache-2.0"
+  "license": "apache-2.0",
+  "hooks": "./.grok-plugin/hooks.json"
 }
