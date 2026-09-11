@@ -208,9 +208,10 @@ $RECYCLE.BIN/
 *.local.json
 .claude/
 
-# Local research workspace — the database and user config. research.toml holds
-# the [llm] api_key_env name (and a user may paste a real key), research.db is
-# local data; neither belongs in version control.
+# Local research workspace — the database and dev-workspace config. The CLI
+# reads its real config from ~/.research/config.toml (which may hold an LLM
+# api_key_env name); research.db is local data. Neither belongs in version
+# control.
 research.db
 research.toml
 
