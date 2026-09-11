@@ -18,7 +18,11 @@ optional `[llm]` config only powers the standalone CLI.
 - Run: `cargo run -- --db /tmp/r.db init`, then `ingest <query>`, `status`;
 - MCP: `cargo run -- mcp` (stdio JSON-RPC; 18 tools)
 - Release: `dist generate` after editing `dist-workspace.toml`; releases fire on
-  a pushed `vX.Y.Z` tag
+  a pushed `vX.Y.Z` tag. Tag-scoped extras live in `.github/workflows/release-extras.yml`
+  (crates.io + Homebrew tap publish, each a green no-op until its secret —
+  `CRATES_API_TOKEN` / `HOMEBREW_TAP_TOKEN` — is configured). `dist generate`
+  regenerates release.yml and drops the hand-added `continue-on-error: true`
+  on `publish-homebrew-formula` — re-add it after regenerating
 
 ## Project Structure
 

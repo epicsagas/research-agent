@@ -287,6 +287,10 @@ jobs:
     needs:
       - plan
       - host
+    # NB: added by hand — `dist generate` regeneration drops this line. Without
+    # HOMEBREW_TAP_TOKEN this job cannot push to the tap; the tag-scoped
+    # release-extras.yml workflow takes over when the secret is configured.
+    continue-on-error: true
     runs-on: "ubuntu-22.04"
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

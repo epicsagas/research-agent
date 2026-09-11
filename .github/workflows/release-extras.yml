@@ -1,0 +1,84 @@
+# Post-release publishing that cargo-dist does not own. Tag-scoped; every job
+# is a green no-op until its credential secret is configured:
+#   - CRATES_API_TOKEN   → cargo publish to crates.io
+#   - HOMEBREW_TAP_TOKEN → commit the dist-generated formula to the tap
+# Secrets are repository settings; see AGENTS.md "Release".
+name: Release extras
+
+on:
+  push:
+    tags:
+      - "**[0-9]+.[0-9]+.[0-9]+*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-extras-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish-crates:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Publish
+        env:
+          CRATES_TOKEN: ${{ secrets.CRATES_API_TOKEN }}
+        if: ${{ env.CRATES_TOKEN != '' }}
+        run: cargo publish --locked --token "$CRATES_TOKEN"
+
+  publish-homebrew:
+    name: Publish Homebrew formula
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for tap token
+        id: gate
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$TAP_TOKEN" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "HOMEBREW_TAP_TOKEN not set — skipping tap update"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v7
+        if: steps.gate.outputs.skip == 'false'
+        with:
+          repository: "epicsagas/homebrew-tap"
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      # release.yml builds and uploads research-agent.rb near the end of its
+      # run — poll for it instead of racing the release workflow.
+      - name: Wait for formula asset on the release
+        if: steps.gate.outputs.skip == 'false'
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/research-agent.rb"
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" -L "$url")
+            [ "$code" = "200" ] && exit 0
+            echo "attempt $i: HTTP $code — retrying in 30s"
+            sleep 30
+          done
+          echo "formula asset not available after 30 minutes" >&2
+          exit 1
+      - name: Commit and push formula update
+        if: steps.gate.outputs.skip == 'false'
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          curl -fsSL "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/research-agent.rb" -o Formula/research-agent.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet Formula/research-agent.rb; then
+            echo "formula already at ${version}"
+            exit 0
+          fi
+          git add Formula/research-agent.rb
+          git commit -m "research-agent ${version}"
+          git push
