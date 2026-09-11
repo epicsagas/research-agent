@@ -43,6 +43,11 @@ research-agent ist ein **Forschungsserver für KI-Agenten**: Er indexiert wissen
 
 Die gleiche Binärdatei funktioniert auch als eigenständiges CLI für Terminals und Skripte.
 
+## Web UI
+
+<img width="49%" src="../../../assets/overview.png" alt="dashboard-overview" />
+<img width="49%" src="../../../assets/papers.png" alt="dashboard-overview" />
+
 ## Funktionen
 
 | | Funktion | Warum es wichtig ist |

@@ -43,6 +43,11 @@ research-agent è un **server di ricerca per agenti IA**: indicizza articoli sci
 
 Lo stesso file binario funziona anche come CLI autonoma per terminali e script.
 
+## Web UI
+
+<img width="49%" src="../../../assets/overview.png" alt="dashboard-overview" />
+<img width="49%" src="../../../assets/papers.png" alt="dashboard-overview" />
+
 ## Funzionalità principali
 
 | | Funzionalità | Perché è importante |

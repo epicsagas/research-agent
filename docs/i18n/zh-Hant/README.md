@@ -43,6 +43,11 @@ research-agent 是一款 **專為 AI Agent 打造的學術研究伺服器**：�
 
 同一個二進位執行檔亦可作為面向終端機與自動化腳本的獨立 CLI 工具。
 
+## Web UI
+
+<img width="49%" src="../../../assets/overview.png" alt="dashboard-overview" />
+<img width="49%" src="../../../assets/papers.png" alt="dashboard-overview" />
+
 ## 功能特色
 
 | | 特色 | 價值 |

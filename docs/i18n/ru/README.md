@@ -43,6 +43,11 @@ research-agent — это **исследовательский сервер дл
 
 Этот же бинарный файл может использоваться как автономный CLI для терминала и скриптов.
 
+## Web UI
+
+<img width="49%" src="../../../assets/overview.png" alt="dashboard-overview" />
+<img width="49%" src="../../../assets/papers.png" alt="dashboard-overview" />
+
 ## Возможности
 
 | | Возможность | Почему это важно |

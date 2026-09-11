@@ -41,6 +41,11 @@ required.
 
 The same binary also works as a standalone CLI for terminals and scripts.
 
+## Web UI
+
+<img width="49%" src="./assets/overview.png" alt="dashboard-overview" />
+<img width="49%" src="./assets/papers.png" alt="dashboard-overview" />
+
 ## Features
 
 | | Feature | Why it matters |

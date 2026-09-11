@@ -43,6 +43,11 @@ research-agent는 **AI 에이전트를 위한 연구 서버**입니다. 논문(a
 
 동일한 바이너리가 터미널 및 스크립트를 위한 독립형 CLI로도 동작합니다.
 
+## Web UI
+
+<img width="49%" src="../../../assets/overview.png" alt="dashboard-overview" />
+<img width="49%" src="../../../assets/papers.png" alt="dashboard-overview" />
+
 ## 주요 기능
 
 | | 기능 | 가치 |

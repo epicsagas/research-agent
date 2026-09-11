@@ -43,6 +43,11 @@ O research-agent é um **servidor de pesquisa para agentes de IA**: ele indexa a
 
 O mesmo executável binário também funciona como uma CLI independente para terminais e scripts.
 
+## Web UI
+
+<img width="49%" src="../../../assets/overview.png" alt="dashboard-overview" />
+<img width="49%" src="../../../assets/papers.png" alt="dashboard-overview" />
+
 ## Recursos principais
 
 | | Recurso | Por que é importante |

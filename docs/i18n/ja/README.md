@@ -43,6 +43,11 @@ research-agent は **AIエージェント向けのリサーチサーバー** で
 
 同じバイナリがターミナルやスクリプト向けのスタンドアロン CLI としても動作します。
 
+## Web UI
+
+<img width="49%" src="../../../assets/overview.png" alt="dashboard-overview" />
+<img width="49%" src="../../../assets/papers.png" alt="dashboard-overview" />
+
 ## 主な機能
 
 | | 機能 | メリット |
