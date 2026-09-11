@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-11
+
+### Added
+- **Dashboard UI overhaul**: light theme alongside the dark reading room, a
+  mobile layout, full-height modals, and rich text rendering. The UI is
+  localized to all ten README languages, with a language picker in the sidebar.
+
+### Fixed
+- The dashboard language dropdown no longer overflows the viewport in narrow
+  sidebars.
+- Session-start auto-install hook: the installer download now times out
+  (10 s connect / 60 s transfer) instead of hanging the session on a stalled
+  network, runs from a private temp directory, and tolerates redirect
+  responses without a `Location` header. The Claude hook command guards on
+  `node` being present. Grok installs find the plugin version even without a
+  `.claude-plugin/` directory.
+- install.sh / install.ps1: network timeouts on every download, PowerShell
+  temp dir is cleaned up on failure too, TLS 1.2 pinned for old Windows
+  PowerShell 5.1 builds.
+- Dashboard hardening: CDN scripts (marked, DOMPurify, KaTeX) are pinned and
+  SRI-verified, all responses carry a Content-Security-Policy, and the
+  dashboard token is compared in constant time.
+- PDF filenames are built from a sanitized arXiv id so a hostile id from
+  third-party metadata cannot write outside the PDF directory.
+- arXiv search queries are percent-encoded (matching the other sources), so
+  `&`, `#`, or `%` in a query can no longer alter the request.
+
 ### Removed
 - **Embedding search subsystem** (local ONNX via fastembed, and remote OpenAI embeddings): `hybrid_search`, the Turbovec vector index, the `[search]` config section, and the embedding-model step of `research init` are all gone. The vector channel built a full ONNX session per command — the model reloaded on every `research query`, and MCP stdio multiplied that by process count, which is how a 53-paper corpus reached 22 GB RSS. Measured on a 117-paper library, `research query` went from minutes to 0.75 s and peak RSS from gigabytes to 13 MB. FTS5 with generated keywords (below) covers the paraphrase recall the vector channel existed for. Drops `fastembed`, `ort`, `turbovec`, `tokenizers`, `hf-hub`, `onig`, `safetensors` and `ndarray` from the dependency tree. Existing configs keep their `[search]` section — it is ignored, not an error. Leftover `~/.research/embeddings.idx`, `embeddings.state.json`, `embeddings.meta.json` and `~/.research/models/` are not deleted automatically; removing them by hand reclaims a few hundred MB.
 

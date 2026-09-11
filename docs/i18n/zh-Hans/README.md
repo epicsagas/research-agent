@@ -47,7 +47,7 @@ research-agent 是一款 **专为 AI Agent 打造的学术研究服务端**：�
 
 | | 特性 | 价值 |
 |--|------|------|
-| 🤖 | MCP 服务端 | 16 个工具直接供 Agent 通过 stdio 调用 — 无需额外 API 密钥 |
+| 🤖 | MCP 服务端 | 18 个工具直接供 Agent 通过 stdio 调用 — 无需额外 API 密钥 |
 | 🧠 | Agent 原生分析 | 知识盲区分析与报告生成在 Agent 内部完成：工具提供结构化状态，Agent 负责推理并持久化结果 |
 | 🔗 | 引文图谱 | 基于 OpenAlex 获取论文间正向/反向引用边，支持 Semantic Scholar 引用意图（citation intent）标签 |
 | 📚 | 论文索引 | 支持 arXiv、Semantic Scholar、OpenAlex、Europe PMC (PubMed)、bioRxiv 等预印本、本地 PDF 以及 Zotero（正在运行的客户端或导出文件） |
@@ -96,7 +96,7 @@ hermes plugins enable research-agent
 
 Hermes 会加载根目录下的 `plugin.yaml` 以及 `__init__.py` 中的 `register(ctx)`。由于 Hermes 不支持 MCP，Agent 会通过内置 Skill 的 CLI 命令调用 `research` — 请先安装二进制文件（`brew install epicsagas/tap/research-agent` 或 curl 安装脚本）；SessionStart 自动安装 Hook 不适用于 Hermes。如果 skills_guard 拦截了安装检查，请在 Hermes 配置中设置 `plugins.scan_on_install: false`。
 
-插件会在会话启动时自动安装 `research` 二进制文件并暴露 16 个 MCP 工具，Agent 便可以使用自身模型自主采集、检索、分析并生成报告。
+插件会在会话启动时自动安装 `research` 二进制文件并暴露 18 个 MCP 工具，Agent 便可以使用自身模型自主采集、检索、分析并生成报告。
 
 安装完成后，您可以这样向 Agent 提问：
 
@@ -108,7 +108,8 @@ Hermes 会加载根目录下的 `plugin.yaml` 以及 `__init__.py` 中的 `regis
 
 插件会在会话启动时自动安装 `research` 二进制文件并启动 **stdio MCP 服务端**（`research mcp`）—— Agent 会自动发现并直接调用这些工具，无需人工输入 CLI 命令。
 
-**可用工具**（共 16 个）: `init` · `ingest` · `index_rebuild` · `import_papers` · `paper_body` · `paper_references` · `query_papers` · `topic_brief` · `gaps_record` · `list_gaps` · `report_material` · `report_save` · `topics_list` · `topic_add` · `state` · `update_read`。
+**可用工具**（共 18 个）: `init` · `ingest` · `index_rebuild` · `import_papers` · `paper_body` · `paper_references` · `query_papers` · `topic_brief` · `gaps_record` · `list_gaps` · `report_material` · `report_save` · `topics_list` · `topic_add` · `state` · `update_read` ·
+`papers_missing_keywords` · `enrich_paper`。
 
 分析流程采用 **Agent 原生机制**：`topic_brief` 与 `report_material` 负责传递结构化的文献库状态（论文列表、阅读进度、已记录的盲区、覆盖度），Agent 借助自身模型进行推理，再通过 `gaps_record` / `report_save` 持久化保存结论。在审阅正文时，`paper_body` 工具可接收可选的 `query` 参数，返回带有章节与页码定位的证据片段，而不是全部正文，从而大幅节省上下文 Token。整个 MCP 交互流程无需任何 `[llm]` 配置或额外 API 密钥。
 

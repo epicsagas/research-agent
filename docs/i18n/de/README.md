@@ -47,7 +47,7 @@ Die gleiche Binärdatei funktioniert auch als eigenständiges CLI für Terminals
 
 | | Funktion | Warum es wichtig ist |
 |--|----------|----------------------|
-| 🤖 | MCP-Server | 16 Werkzeuge, die Ihr Agent direkt über stdio steuert — kein API-Schlüssel erforderlich |
+| 🤖 | MCP-Server | 18 Werkzeuge, die Ihr Agent direkt über stdio steuert — kein API-Schlüssel erforderlich |
 | 🧠 | Agenten-native Analyse | Lückenanalyse und Berichte laufen innerhalb Ihres Agenten: Werkzeuge liefern strukturierten Zustand, der Agent schlussfolgert, Ergebnisse werden gespeichert |
 | 🔗 | Zitationsgraph | Referenzkanten zwischen Papern von OpenAlex, vorwärts und rückwärts, optional beschriftet mit Semantic-Scholar-Zitationsabsichten |
 | 📚 | Paper-Indexierung | arXiv, Semantic Scholar, OpenAlex, Europe PMC (PubMed), bioRxiv-Preprints, lokale PDFs und Zotero (laufende Instanz oder Exportdateien) |
@@ -96,7 +96,7 @@ hermes plugins enable research-agent
 
 Hermes lädt `plugin.yaml` im Hauptverzeichnis und `register(ctx)` in `__init__.py`. Da Hermes kein MCP unterstützt, steuert der Agent `research` über die CLI-Befehle des mitgelieferten Skills — installieren Sie zuerst die Binärdatei (`brew install epicsagas/tap/research-agent` oder per curl-Installationsskript); der SessionStart-Autoinstallations-Hook gilt nicht für Hermes. Falls skills_guard den Installationsscan blockiert, setzen Sie `plugins.scan_on_install: false` in der Hermes-Konfiguration.
 
-Das Plugin installiert die `research`-Binärdatei beim Sitzungsstart automatisch und stellt 16 MCP-Tools bereit, sodass der Agent selbstständig Paper erfassen, durchsuchen, analysieren und Berichte verfassen kann.
+Das Plugin installiert die `research`-Binärdatei beim Sitzungsstart automatisch und stellt 18 MCP-Tools bereit, sodass der Agent selbstständig Paper erfassen, durchsuchen, analysieren und Berichte verfassen kann.
 
 Sobald installiert, können Sie Ihren Agenten beispielsweise Folgendes fragen:
 
@@ -108,7 +108,8 @@ Sobald installiert, können Sie Ihren Agenten beispielsweise Folgendes fragen:
 
 Das Plugin installiert die `research`-Binärdatei beim Start automatisch und startet den **stdio-MCP-Server** (`research mcp`) — der Agent entdeckt und nutzt die Tools direkt, ohne manuelle CLI-Eingaben.
 
-**Tools** (16): `init` · `ingest` · `index_rebuild` · `import_papers` · `paper_body` · `paper_references` · `query_papers` · `topic_brief` · `gaps_record` · `list_gaps` · `report_material` · `report_save` · `topics_list` · `topic_add` · `state` · `update_read`.
+**Tools** (18): `init` · `ingest` · `index_rebuild` · `import_papers` · `paper_body` · `paper_references` · `query_papers` · `topic_brief` · `gaps_record` · `list_gaps` · `report_material` · `report_save` · `topics_list` · `topic_add` · `state` · `update_read` ·
+`papers_missing_keywords` · `enrich_paper`.
 
 Die Analyse ist **agenten-nativ**: `topic_brief` und `report_material` übergeben den strukturierten Bibliothekszustand (Paper, Lesestatus, erfasste Lücken, Abdeckung), der Agent zieht Schlüsse mit seinem eigenen Modell, und `gaps_record` / `report_save` sichern die Erkenntnisse. Bei der Textprüfung akzeptiert `paper_body` einen optionalen `query`-Parameter, um verankerte Textbelege (mit Abschnitt und Seitenzahl) anstelle des gesamten Volltexts zurückzugeben, was wertvollen Kontext spart. Im gesamten MCP-Ablauf ist weder eine `[llm]`-Konfiguration noch ein API-Schlüssel nötig.
 

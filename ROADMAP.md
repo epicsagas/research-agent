@@ -4,17 +4,18 @@ Shipped capabilities live in the [README](README.md) and
 [CHANGELOG](CHANGELOG.md); this file tracks what is deliberately **not** built
 yet. Items are ordered by expected value, not scheduled.
 
-## Zotero write-back (two-way sync)
+## Zotero two-way sync (beyond tag write-back)
 
-The one-way read half shipped (`research ingest --source zotero`, reads the
-running instance's local API, needs no auth) and the importer deficiencies
-that used to motivate live sync are fixed: abstracts, tags, Zotero-native
-JSON, API-shaped items, and DOI normalization all landed. What remains is
-deliberately unbuilt: writing back to Zotero, or full two-way sync. The local
-API's write path requires per-instance single-use keys the user grants through
-a confirmation dialog, and any merge needs conflict resolution with no UI to
-resolve it. Zotero also has no reading-status or rating field, so the two
-fields this tool owns have nowhere to sync back to (full analysis:
+Both read and the first write slice shipped: `research ingest --source zotero`
+reads the running instance's local API (no auth), and
+`research export --to zotero` pushes paper tags back, matched by normalized
+DOI (dry-run by default; `--apply` writes, per-item confirmation dialogs
+authorize it). What remains deliberately unbuilt is full two-way sync of
+content: abstracts, notes, or child-item edits. The local API's write path
+requires per-instance single-use keys the user grants through a confirmation
+dialog, any merge needs conflict resolution with no UI to resolve it, and
+Zotero has no reading-status or rating field, so the two fields this tool owns
+have nowhere to sync back to (full analysis:
 [docs/roadmap-research-2026-09.md](docs/roadmap-research-2026-09.md)). Gated
 on a concrete need: a user wanting annotations or edits pushed from this tool
 into their Zotero library.

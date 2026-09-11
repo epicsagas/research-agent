@@ -5,7 +5,7 @@ description: "Academic literature research via the `research` CLI — ingest pap
 
 # Research — Academic Literature Assistant
 
-Drive the `research` CLI (installed at `~/.cargo/bin/research`) to collect, organize, and analyze academic papers, then report findings in Korean.
+Drive the `research` CLI (must be on your PATH — install via the plugin's SessionStart hook, Homebrew, or the curl installer) to collect, organize, and analyze academic papers, then report findings in Korean.
 
 ## Workspace Setup
 
@@ -16,7 +16,7 @@ mkdir -p ~/research-ws && cd ~/research-ws
 research init
 ```
 
-For real LLM gap analysis and reports, edit `research.toml` and add:
+For real LLM gap analysis and reports, edit `~/.research/config.toml` (the CLI only reads this file, never a workspace-local one) and add:
 
 ```toml
 [llm]
@@ -65,7 +65,7 @@ Requires `[llm]` config. Returns `KnowledgeGap` records (missing literature, met
 research read <paper-id>                              # show detail (status, rating, abstract)
 research read <paper-id> --status completed           # unread|queued|in_progress|completed|abandoned
 research read <paper-id> --rating 4                   # 1-5
-research read <paper-id> --status read --rating 5     # both validated before any write
+research read <paper-id> --status completed --rating 5     # both validated before any write
 ```
 
 Rating is enforced 1-5; out-of-range bails before touching the DB.

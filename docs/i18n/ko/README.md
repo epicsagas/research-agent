@@ -47,7 +47,7 @@ research-agent는 **AI 에이전트를 위한 연구 서버**입니다. 논문(a
 
 | | 기능 | 가치 |
 |--|------|------|
-| 🤖 | MCP 서버 | 에이전트가 stdio를 통해 직접 구동하는 16개 도구 — API 키 불필요 |
+| 🤖 | MCP 서버 | 에이전트가 stdio를 통해 직접 구동하는 18개 도구 — API 키 불필요 |
 | 🧠 | 에이전트 네이티브 분석 | 지식 공백 분석과 리포트 작성이 에이전트 내부에서 실행됨: 도구가 구조화된 상태를 전달하고, 에이전트가 추론하며, 결과가 영구 저장됨 |
 | 🔗 | 인용 그래프 | OpenAlex 기반 논문 간 참조 엣지(정방향 및 역방향), 선택적으로 Semantic Scholar 인용 의도(citation intent) 라벨링 |
 | 📚 | 논문 색인 | arXiv, Semantic Scholar, OpenAlex, Europe PMC (PubMed), bioRxiv 계열 프리프린트, 로컬 PDF, Zotero(실행 중인 인스턴스 또는 내보내기 파일) |
@@ -96,7 +96,7 @@ hermes plugins enable research-agent
 
 Hermes는 루트 `plugin.yaml`과 `__init__.py`의 `register(ctx)`를 로드합니다. Hermes는 MCP를 지원하지 않으므로, 에이전트는 번들된 스킬의 CLI 명령어를 통해 `research`를 구동합니다. 먼저 바이너리를 설치하세요(`brew install epicsagas/tap/research-agent` 또는 curl 설치 스크립트). SessionStart 자동 설치 훅은 hermes에 적용되지 않습니다. skills_guard가 설치 검사를 차단하는 경우 hermes 설정에서 `plugins.scan_on_install: false`로 설정하세요.
 
-플러그인은 세션 시작 시 `research` 바이너리를 자동 설치하고 16개의 MCP 도구를 노출하므로, 에이전트가 자체 모델을 사용하여 논문 수집, 검색, 분석, 리포트 작성을 스스로 수행할 수 있습니다.
+플러그인은 세션 시작 시 `research` 바이너리를 자동 설치하고 18개의 MCP 도구를 노출하므로, 에이전트가 자체 모델을 사용하여 논문 수집, 검색, 분석, 리포트 작성을 스스로 수행할 수 있습니다.
 
 설치 후 에이전트에게 다음과 같이 요청해 보세요:
 
@@ -108,7 +108,8 @@ Hermes는 루트 `plugin.yaml`과 `__init__.py`의 `register(ctx)`를 로드합�
 
 플러그인은 세션 시작 시 `research` 바이너리를 자동 설치하고 **stdio MCP 서버**(`research mcp`)를 실행합니다. 에이전트가 도구를 직접 검색하고 호출하므로 사용자가 직접 CLI 명령을 입력할 필요가 없습니다.
 
-**도구 목록** (16개): `init` · `ingest` · `index_rebuild` · `import_papers` · `paper_body` · `paper_references` · `query_papers` · `topic_brief` · `gaps_record` · `list_gaps` · `report_material` · `report_save` · `topics_list` · `topic_add` · `state` · `update_read`.
+**도구 목록** (18개): `init` · `ingest` · `index_rebuild` · `import_papers` · `paper_body` · `paper_references` · `query_papers` · `topic_brief` · `gaps_record` · `list_gaps` · `report_material` · `report_save` · `topics_list` · `topic_add` · `state` · `update_read` ·
+`papers_missing_keywords` · `enrich_paper`.
 
 분석은 **에이전트 네이티브** 방식으로 이루어집니다. `topic_brief`와 `report_material`이 구조화된 라이브러리 상태(논문, 읽기 진행 상황, 기록된 공백, 커버리지)를 전달하면, 에이전트가 자체 모델로 추론하고 `gaps_record` / `report_save`가 분석 결과를 저장합니다. 본문 검토 시 `paper_body` 도구에 선택적 `query` 파라미터를 전달하여 전체 본문 대신 섹션 및 페이지가 표시된 증거 스니펫을 반환받아 컨텍스트를 크게 절약할 수 있습니다. MCP 워크플로 전체에서 `[llm]` 설정이나 API 키가 전혀 필요하지 않습니다.
 

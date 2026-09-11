@@ -47,7 +47,7 @@ research-agent 是一款 **專為 AI Agent 打造的學術研究伺服器**：�
 
 | | 特色 | 價值 |
 |--|------|------|
-| 🤖 | MCP 伺服端 | 16 個工具供 Agent 直接透過 stdio 呼叫 — 無需額外 API 金鑰 |
+| 🤖 | MCP 伺服端 | 18 個工具供 Agent 直接透過 stdio 呼叫 — 無需額外 API 金鑰 |
 | 🧠 | Agent 原生分析 | 知識盲區分析與報告生成於 Agent 內部執行：工具提供結構化狀態，Agent 負責推理並持久化結果 |
 | 🔗 | 引文圖譜 | 基於 OpenAlex 取得論文間正向/反向引用關係，支援 Semantic Scholar 引用意圖（citation intent）標籤 |
 | 📚 | 論文索引 | 支援 arXiv、Semantic Scholar、OpenAlex、Europe PMC (PubMed)、bioRxiv 等預印本、本機 PDF 以及 Zotero（執行中的用戶端或匯出檔案） |
@@ -96,7 +96,7 @@ hermes plugins enable research-agent
 
 Hermes 會載入根目錄下的 `plugin.yaml` 與 `__init__.py` 中的 `register(ctx)`。由於 Hermes 不支援 MCP，Agent 會透過內建 Skill 的 CLI 命令呼叫 `research` — 請先安裝二進位檔案（`brew install epicsagas/tap/research-agent` 或 curl 安裝腳本）；SessionStart 自動安裝 Hook 不適用於 Hermes。若 skills_guard 攔截了安裝檢查，請於 Hermes 設定中加入 `plugins.scan_on_install: false`。
 
-此外掛程式會在工作階段啟動時自動安裝 `research` 二進位檔並提供 16 個 MCP 工具，讓 Agent 能利用自身模型自主擷取、檢索、分析並撰寫報告。
+此外掛程式會在工作階段啟動時自動安裝 `research` 二進位檔並提供 18 個 MCP 工具，讓 Agent 能利用自身模型自主擷取、檢索、分析並撰寫報告。
 
 安裝完成後，您可以向 Agent 提出如下請求：
 
@@ -108,7 +108,8 @@ Hermes 會載入根目錄下的 `plugin.yaml` 與 `__init__.py` 中的 `register
 
 外掛程式會在工作階段啟動時自動安裝 `research` 二進位檔並啟動 **stdio MCP 伺服端**（`research mcp`）—— Agent 會自動探索並直接呼叫工具，使用者無需手動輸入 CLI 指令。
 
-**可用工具**（共 16 個）: `init` · `ingest` · `index_rebuild` · `import_papers` · `paper_body` · `paper_references` · `query_papers` · `topic_brief` · `gaps_record` · `list_gaps` · `report_material` · `report_save` · `topics_list` · `topic_add` · `state` · `update_read`。
+**可用工具**（共 18 個）: `init` · `ingest` · `index_rebuild` · `import_papers` · `paper_body` · `paper_references` · `query_papers` · `topic_brief` · `gaps_record` · `list_gaps` · `report_material` · `report_save` · `topics_list` · `topic_add` · `state` · `update_read` ·
+`papers_missing_keywords` · `enrich_paper`。
 
 分析流程採用 **Agent 原生架構**：`topic_brief` 與 `report_material` 負責傳遞結構化的文獻庫狀態（論文列表、閱讀進度、記錄的缺口、覆蓋率），Agent 藉由自身模型進行推理，再透過 `gaps_record` / `report_save` 永久儲存結果。在審閱內文時，`paper_body` 工具可接收選填的 `query` 參數，回傳附帶章節與頁碼定位的證據片段，而非整份全文，進而大幅節省上下文 Token。在整個 MCP 流程中完全無需 `[llm]` 設定或 API 金鑰。
 

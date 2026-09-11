@@ -4,7 +4,7 @@ research-agent — personal long-term research assistant: CLI + stdio MCP server
 that indexes papers (arXiv, Semantic Scholar, local PDFs) into SQLite with FTS5,
 tracks a topic hierarchy, runs LLM knowledge-gap analysis and report generation.
 Also ships as a plugin for Claude Code, Codex, Antigravity, Grok Build, and
-Hermes, exposing 13 MCP tools. Gap analysis and reports are agent-native:
+Hermes, exposing 18 MCP tools. Gap analysis and reports are agent-native:
 tools hand over structured topic state and persist what the host model
 concludes; the
 optional `[llm]` config only powers the standalone CLI.
@@ -16,7 +16,7 @@ optional `[llm]` config only powers the standalone CLI.
 - Lint: `cargo clippy --all-targets -- -D warnings` | Format: `cargo fmt --all --check` / `cargo fmt`
 - Audit: `cargo audit`
 - Run: `cargo run -- --db /tmp/r.db init`, then `ingest <query>`, `status`;
-- MCP: `cargo run -- mcp` (stdio JSON-RPC; 15 tools)
+- MCP: `cargo run -- mcp` (stdio JSON-RPC; 18 tools)
 - Release: `dist generate` after editing `dist-workspace.toml`; releases fire on
   a pushed `vX.Y.Z` tag
 
@@ -40,6 +40,7 @@ optional `[llm]` config only powers the standalone CLI.
   round-trips are `#[ignore]`-gated (arXiv rate-limits hard — HTTP 429).
 - HTTP responses are checked before parsing: a non-2xx from arXiv/S2 is a typed
   `ResearchError::Source`, never an empty result.
-- Version lockstep: `Cargo.toml` version, `plugin.json`, `.claude-plugin/plugin.json`
-  and `.codex-plugin/plugin.json` must move together.
+- Version lockstep: `Cargo.toml` version, `plugin.json`, `plugin.yaml`,
+  `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json` and
+  `.grok-plugin/plugin.json` must move together.
 - Tests are offline by default; keep `cargo test` green with no network.

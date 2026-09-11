@@ -47,7 +47,7 @@ research-agent は **AIエージェント向けのリサーチサーバー** で
 
 | | 機能 | メリット |
 |--|------|----------|
-| 🤖 | MCP サーバー | エージェントが stdio 経由で直接操作できる 16 個のツール — APIキー不要 |
+| 🤖 | MCP サーバー | エージェントが stdio 経由で直接操作できる 18 個のツール — APIキー不要 |
 | 🧠 | エージェントネイティブ分析 | ギャップ分析とレポート作成がエージェント内部で実行：ツールが構造化された状態を渡し、エージェントが推論し、結果が永続化される |
 | 🔗 | 引用グラフ | OpenAlex からの論文間参照エッジ（順方向・逆方向）、オプションで Semantic Scholar の引用意図（citation intent）ラベル付き |
 | 📚 | 論文インデックス | arXiv、Semantic Scholar、OpenAlex、Europe PMC（PubMed）、bioRxiv 系プレプリント、ローカル PDF、Zotero（起動中のインスタンスまたはエクスポートファイル） |
@@ -96,7 +96,7 @@ hermes plugins enable research-agent
 
 Hermes はルートの `plugin.yaml` と `__init__.py` の `register(ctx)` を読み込みます。MCP をサポートしていないため、エージェントは同梱スキルの CLI コマンドを介して `research` を実行します。あらかじめバイナリをインストールしてください（`brew install epicsagas/tap/research-agent` または curl インストーラ）。SessionStart の自動インストールフックは hermes には適用されません。skills_guard がインストールスキャンをブロックする場合は、hermes 設定で `plugins.scan_on_install: false` を設定してください。
 
-プラグインはセッション開始時に `research` バイナリを自動インストールし、16 個の MCP ツールを公開します。エージェントは独自モデルを使用して、論文の取り込み、検索、分析、レポート作成を自律的に行えます。
+プラグインはセッション開始時に `research` バイナリを自動インストールし、18 個の MCP ツールを公開します。エージェントは独自モデルを使用して、論文の取り込み、検索、分析、レポート作成を自律的に行えます。
 
 インストール後、エージェントに次のように尋ねてみてください：
 
@@ -108,7 +108,8 @@ Hermes はルートの `plugin.yaml` と `__init__.py` の `register(ctx)` を�
 
 プラグインはセッション開始時に `research` バイナリを自動インストールし、**stdio MCP サーバー**（`research mcp`）を起動します。エージェントがツールを直接検出して呼び出すため、人間が CLI コマンドを入力する必要はありません。
 
-**ツール一覧** (16個): `init` · `ingest` · `index_rebuild` · `import_papers` · `paper_body` · `paper_references` · `query_papers` · `topic_brief` · `gaps_record` · `list_gaps` · `report_material` · `report_save` · `topics_list` · `topic_add` · `state` · `update_read`。
+**ツール一覧** (18個): `init` · `ingest` · `index_rebuild` · `import_papers` · `paper_body` · `paper_references` · `query_papers` · `topic_brief` · `gaps_record` · `list_gaps` · `report_material` · `report_save` · `topics_list` · `topic_add` · `state` · `update_read` ·
+`papers_missing_keywords` · `enrich_paper`。
 
 分析は**エージェントネイティブ**です：`topic_brief` と `report_material` が構造化されたライブラリ状態（論文、読書進捗、記録されたギャップ、カバレッジ）を渡し、エージェントが独自モデルで推論を行い、`gaps_record` / `report_save` がその結果を永続化します。本文を検証する際、`paper_body` ツールに任意の `query` パラメータを渡すことで、全文の代わりにセクションとページ位置付きの証拠スニペットを取得でき、コンテキストを大幅に節約できます。MCP フロー全体で `[llm]` 設定や API キーは一切不要です。
 

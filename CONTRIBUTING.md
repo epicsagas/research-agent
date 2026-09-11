@@ -34,10 +34,17 @@ cargo fmt
 src/
 ├── domain/        # Paper, ResearchTopic, KnowledgeGap, Citation, ResearchReport
 ├── ports/         # PaperSource, IndexStore, ResearchEngine
-├── adapters/      # ArxivSource, SemanticScholarSource, SqliteStore, LlmResearchEngine
-├── application/   # IngestPipeline, GapAnalyzer, ReportGenerator
+├── adapters/      # ArxivSource, SemanticScholarSource, OpenAlexSource,
+│                  # EuropePmcSource, ZoteroSource/Write, PdfSource, BibImporter,
+│                  # SqliteStore, LlmResearchEngine
+├── application/   # IngestPipeline, GapAnalyzer, ReportGenerator, enrichment
 ├── store/         # SQLite schema and migrations
+├── mcp/           # stdio MCP server (tools, params, stdin guard)
+├── dashboard.rs + # local web dashboard (embedded single-page UI)
+│   dashboard/
+├── composition.rs # dependency wiring
 ├── config.rs      # CLI configuration
+├── onboard.rs     # first-run onboarding wizard
 ├── error.rs       # Error types
 ├── lib.rs         # Public API
 └── main.rs        # CLI entry point

@@ -13,10 +13,9 @@ ci = "github"
 installers = ["shell", "powershell", "homebrew"]
 # Homebrew tap repository (auto-published by cargo-dist on release).
 tap = "epicsagas/homebrew-tap"
-# Target platforms. musl targets are dropped: the local ONNX embedding runtime
-# (llm-kernel `embedding-fastembed`, static ort) has no musl prebuilt archive
-# and needs glibc >= 2.38 at runtime. ARM64 (Apple Silicon + Graviton) included
-# per epicsagas standard.
+# Target platforms. musl targets are dropped: linux-gnu needs glibc >= 2.38
+# at runtime (see README Requirements). ARM64 (Apple Silicon + Graviton)
+# included per epicsagas standard.
 targets = [
   "aarch64-apple-darwin",
   "aarch64-unknown-linux-gnu",

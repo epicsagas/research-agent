@@ -45,7 +45,7 @@ The same binary also works as a standalone CLI for terminals and scripts.
 
 | | Feature | Why it matters |
 |--|---------|----------------|
-| 🤖 | MCP server | 16 tools your agent drives directly over stdio — no API key needed |
+| 🤖 | MCP server | 18 tools your agent drives directly over stdio — no API key needed |
 | 🧠 | Agent-native analysis | Gap analysis and reports run inside your agent: tools hand over structured state, the agent reasons, results are persisted |
 | 🔗 | Citation graph | Paper-to-paper reference edges from OpenAlex, forward and reverse, optionally labeled with Semantic Scholar citation intents |
 | 📚 | Paper indexing | arXiv, Semantic Scholar, OpenAlex, Europe PMC (PubMed), bioRxiv-style preprints, local PDFs, and Zotero (a running instance or its export files) |
@@ -100,7 +100,7 @@ auto-install hook does not apply to hermes. If skills_guard blocks the
 install scan, set `plugins.scan_on_install: false` in the hermes config.
 
 The plugin auto-installs the `research` binary on session start and exposes
-16 MCP tools, so the agent can ingest, search, analyze with its own model, and file reports on its own.
+18 MCP tools, so the agent can ingest, search, analyze with its own model, and file reports on its own.
 
 Once installed, ask your agent things like:
 
@@ -114,10 +114,11 @@ The plugin auto-installs the `research` binary on session start and starts the
 **stdio MCP server** (`research mcp`) — the agent discovers and calls the tools
 directly; no human typing CLI commands.
 
-**Tools** (16): `init` · `ingest` · `index_rebuild` · `import_papers` ·
+**Tools** (18): `init` · `ingest` · `index_rebuild` · `import_papers` ·
 `paper_body` · `paper_references` · `query_papers` · `topic_brief` ·
 `gaps_record` · `list_gaps` · `report_material` · `report_save` ·
-`topics_list` · `topic_add` · `state` · `update_read`.
+`topics_list` · `topic_add` · `state` · `update_read` ·
+`papers_missing_keywords` · `enrich_paper`.
 
 Analysis is **agent-native**: `topic_brief` and `report_material` hand over the
 structured library state (papers, reading progress, recorded gaps, coverage),
@@ -205,6 +206,8 @@ research --version
 | `research read <id> --body` | Print a paper's stored body text |
 | `research status` | Show research state overview |
 | `research export --to zotero [--apply]` | Push paper tags into a running Zotero, matched by normalized DOI. Dry-run by default (prints what would change, writes nothing); `--apply` writes. Items changed in Zotero are skipped, never merged. CLI-only by design — no MCP tool |
+| `research enrich [id] [--keywords "..."]` | Add search keywords to papers so paraphrased queries hit (uses `[llm]` when configured; without one prints the papers needing keywords) |
+| `research dashboard [--port <n>]` | Serve the local web dashboard (read-only views + reading-status editing; loopback by default, token-gated on other hosts) |
 | `research mcp` | Start the stdio MCP server (alias: `serve`) |
 
 Verifying the Zotero push needs a running Zotero (10+ for writes): run
@@ -222,7 +225,8 @@ workspaces.
 - Rust 1.92+ (only if building from source; pre-built binaries need nothing)
 - Data lives at `~/.research/` (`research.db` index, `config.toml`)
 - Linux binaries target glibc ≥ 2.38 (Ubuntu 24.04+)
-- Optional: an LLM for `research gaps` / `research report` **from the CLI only** — set `[llm]` in `~/.research/config.toml` (`provider`, `model`, `api_key_env`); the key is read from that env var at call time. The MCP flow never needs it
+- Optional: an LLM for `research gaps` / `research report` **from the CLI only** — set `[llm]` in `~/.research/config.toml` (`provider`, `model`, `api_key_env`, and `base_url` for OpenAI-compatible endpoints); the key is read from that env var at call time. The MCP flow never needs it
+- Config reference: `[dashboard] port` (default 7777), plus `host` and `token` when you bind beyond loopback — a token is generated into `config.toml` and required for every request
 - Optional: `research enrich` adds search keywords so queries worded
   differently from the abstract still find the paper. It uses `[llm]` when set;
   without one it prints the papers needing keywords, for an agent (or you) to
