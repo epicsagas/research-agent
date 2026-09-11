@@ -9,7 +9,7 @@
       "description": "Personal academic research assistant — arXiv/Semantic-Scholar ingestion, topic hierarchy, LLM gap analysis and reports, and paper ratings.",
       "source": {
         "source": "local",
-        "path": "./plugins/research-agent"
+        "path": "./"
       },
       "pluginManifest": "./.codex-plugin/plugin.json",
       "policy": {
