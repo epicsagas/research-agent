@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.1] - 2026-09-11
+## [0.2.0] - 2026-09-11
 
 ### Fixed
 - The one-line installers (install.sh / install.ps1) looked for
@@ -17,11 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Release pipeline: the tag-scoped `release-extras` workflow publishes to
-  crates.io (`CRATES_API_TOKEN`) and the Homebrew tap (`HOMEBREW_TAP_TOKEN`),
+  crates.io (`CARGO_REGISTRY_TOKEN`) and the Homebrew tap (`HOMEBREW_TAP_TOKEN`),
   each a green no-op until its secret is configured; a missing tap token no
   longer marks the whole release run failed; CI cancels superseded runs.
-
-## [0.2.0] - 2026-09-11
 
 ### Added
 - **Dashboard UI overhaul**: light theme alongside the dark reading room, a

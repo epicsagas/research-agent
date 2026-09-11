@@ -20,9 +20,11 @@ optional `[llm]` config only powers the standalone CLI.
 - Release: `dist generate` after editing `dist-workspace.toml`; releases fire on
   a pushed `vX.Y.Z` tag. Tag-scoped extras live in `.github/workflows/release-extras.yml`
   (crates.io + Homebrew tap publish, each a green no-op until its secret —
-  `CRATES_API_TOKEN` / `HOMEBREW_TAP_TOKEN` — is configured). `dist generate`
+  `CARGO_REGISTRY_TOKEN` / `HOMEBREW_TAP_TOKEN` — is configured). `dist generate`
   regenerates release.yml and drops the hand-added `continue-on-error: true`
-  on `publish-homebrew-formula` — re-add it after regenerating
+  on `publish-homebrew-formula` — re-add it after regenerating. The repo's
+  default workflow permission must stay `write` or the release cannot create
+  the GitHub Release (HTTP 403)
 
 ## Project Structure
 

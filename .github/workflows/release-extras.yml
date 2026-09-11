@@ -1,7 +1,8 @@
 # Post-release publishing that cargo-dist does not own. Tag-scoped; every job
 # is a green no-op until its credential secret is configured:
-#   - CRATES_API_TOKEN   → cargo publish to crates.io
-#   - HOMEBREW_TAP_TOKEN → commit the dist-generated formula to the tap
+#   - CARGO_REGISTRY_TOKEN → cargo publish to crates.io (the name `cargo
+#     login` itself uses)
+#   - HOMEBREW_TAP_TOKEN   → commit the dist-generated formula to the tap
 # Secrets are repository settings; see AGENTS.md "Release".
 name: Release extras
 
@@ -26,7 +27,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Publish
         env:
-          CRATES_TOKEN: ${{ secrets.CRATES_API_TOKEN }}
+          CRATES_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         if: ${{ env.CRATES_TOKEN != '' }}
         run: cargo publish --locked --token "$CRATES_TOKEN"
 

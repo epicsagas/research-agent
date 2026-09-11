@@ -1,6 +1,6 @@
 [package]
 name = "research-agent"
-version = "0.2.1"
+version = "0.2.0"
 edition = "2024"
 description = "Long-term research assistant: index papers, articles, and PDFs"
 repository = "https://github.com/epicsagas/research-agent"
