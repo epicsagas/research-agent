@@ -29,7 +29,8 @@ if [ -z "${version}" ]; then
 fi
 
 base_url="https://github.com/${REPO}/releases/download/v${version}"
-archive="${BINARY}-${target}.tar.xz"
+# cargo-dist names archives after the package, not the binary.
+archive="research-agent-${target}.tar.xz"
 url="${base_url}/${archive}"
 sha_url="${base_url}/${archive}.sha256"
 

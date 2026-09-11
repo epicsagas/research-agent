@@ -24,7 +24,8 @@ if (-not $tag) { Write-Error "Error: could not determine latest version"; exit 1
 $version = $tag.TrimStart("v")
 
 $baseUrl = "https://github.com/$Repo/releases/download/$tag"
-$archive = "$Binary-$target.zip"
+# cargo-dist names archives after the package, not the binary.
+$archive = "research-agent-$target.zip"
 $url     = "$baseUrl/$archive"
 $shaUrl  = "$baseUrl/$archive.sha256"
 
