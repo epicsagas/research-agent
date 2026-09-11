@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-11
+
+### Changed
+- crates.io channel: `research-agent` is registered on crates.io (initial
+  0.1.0 by hand) and future tags publish automatically via the
+  `release-extras` workflow. Homebrew tap publishing is single-owner
+  (cargo-dist's own job). Cargo.lock is now committed for reproducible
+  release builds.
+
 ## [0.2.0] - 2026-09-11
 
 ### Fixed
