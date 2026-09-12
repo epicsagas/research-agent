@@ -12,7 +12,7 @@
       "source": {
         "source": "url",
         "url": "https://github.com/epicsagas/research-agent.git",
-        "sha": "329ef7c56d551ecdb55cd96db30b04883fa14615"
+        "sha": "7a475735fd1fe37bd6b0ea48923cd1750494396c"
       },
       "homepage": "https://github.com/epicsagas/research-agent",
       "keywords": [
