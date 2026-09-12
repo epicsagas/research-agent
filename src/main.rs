@@ -552,6 +552,21 @@ fn cmd_query(db: PathBuf, query: String, limit: usize, evidence: bool) -> Result
             if let Some(year) = paper.year {
                 println!("  Year: {year}");
             }
+            // 원문 출처: url → DOI → arXiv → 로컬 PDF 순으로 처음 있는 것 하나만.
+            let source = paper
+                .url
+                .clone()
+                .or_else(|| paper.doi.as_ref().map(|d| format!("https://doi.org/{d}")))
+                .or_else(|| {
+                    paper
+                        .arxiv_id
+                        .as_ref()
+                        .map(|a| format!("https://arxiv.org/abs/{a}"))
+                })
+                .or_else(|| paper.pdf_path.clone());
+            if let Some(source) = source {
+                println!("  Source: {source}");
+            }
             println!();
         }
         println!("{} paper(s) found.", results.len());
