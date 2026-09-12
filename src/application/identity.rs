@@ -11,25 +11,31 @@ use crate::ports::index_store::IndexStore;
 /// Identity key precedence: normalized DOI, then pdf_path, then normalized
 /// title. The title key only fires when neither stronger key exists, so a
 /// DOI-carrying paper that is new by DOI is not suppressed by an unrelated
-/// same-titled row.
-pub fn is_already_stored(store: &dyn IndexStore, paper: &Paper) -> Result<bool> {
+/// same-titled row. Returns the stored row so callers can act on the existing
+/// paper (link it to a topic, reuse its id) rather than only learning that a
+/// duplicate exists.
+pub fn find_already_stored(store: &dyn IndexStore, paper: &Paper) -> Result<Option<Paper>> {
     if let Some(doi) = paper.doi.as_deref()
-        && store.find_paper_by_doi(doi)?.is_some()
+        && let Some(found) = store.find_paper_by_doi(doi)?
     {
-        return Ok(true);
+        return Ok(Some(found));
     }
     if let Some(path) = paper.pdf_path.as_deref()
-        && store.find_paper_by_pdf_path(path)?.is_some()
+        && let Some(found) = store.find_paper_by_pdf_path(path)?
     {
-        return Ok(true);
+        return Ok(Some(found));
     }
     if paper.doi.is_none() && paper.pdf_path.is_none() {
         let title_key = normalize_title(&paper.title);
-        if !title_key.is_empty() && store.find_paper_by_title(&title_key)?.is_some() {
-            return Ok(true);
+        if !title_key.is_empty() {
+            return store.find_paper_by_title(&title_key);
         }
     }
-    Ok(false)
+    Ok(None)
+}
+
+pub fn is_already_stored(store: &dyn IndexStore, paper: &Paper) -> Result<bool> {
+    Ok(find_already_stored(store, paper)?.is_some())
 }
 
 #[cfg(test)]
@@ -91,5 +97,26 @@ mod tests {
         let store = SqliteStore::open_in_memory().unwrap();
         store.insert_paper(&paper("known")).unwrap();
         assert!(!is_already_stored(&store, &paper("brand new")).unwrap());
+    }
+
+    /// Callers that repair state on a duplicate (topic linking) need the
+    /// stored row itself, not just a bool — its id is the only one that exists
+    /// in the database.
+    #[test]
+    fn find_already_stored_returns_the_stored_row() {
+        let store = SqliteStore::open_in_memory().unwrap();
+        let mut stored = paper("Known Paper");
+        stored.id = "stored-7".into();
+        store.insert_paper(&stored).unwrap();
+
+        let found = find_already_stored(&store, &paper("known paper"))
+            .unwrap()
+            .expect("duplicate by title must resolve to the stored row");
+        assert_eq!(found.id, "stored-7");
+        assert!(
+            find_already_stored(&store, &paper("other"))
+                .unwrap()
+                .is_none()
+        );
     }
 }

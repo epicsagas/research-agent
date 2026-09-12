@@ -162,6 +162,51 @@ fn parse_keywords(text: &str) -> Result<Vec<(String, String)>> {
     Ok(pairs)
 }
 
+/// Complete a request and parse the reply, retrying once on a format
+/// violation. Free/OpenRouter models leak reasoning and ignore line formats;
+/// the retry echoes the offending reply back with the format restated, which
+/// recovers most of them. Only a second consecutive violation fails — and the
+/// error says explicitly that nothing was persisted, so a caller can never
+/// mistake the failure for a silently-stubbed result. `format_rule` states
+/// the one-line format; `what` names the operation in warnings/errors.
+async fn complete_parsed<T>(
+    client: &dyn LLMClient,
+    request: LLMRequest,
+    format_rule: &str,
+    what: &str,
+    parse: impl Fn(&str) -> Result<T>,
+) -> Result<T> {
+    let first = client
+        .complete(request.clone())
+        .await
+        .map_err(|e| ResearchError::Source(e.to_string()))?;
+    let text = sanitize_output(&first.content);
+    match parse(&text) {
+        Ok(parsed) => Ok(parsed),
+        Err(first_err) => {
+            eprintln!("Warning: {what} reply violated the format, retrying once ({first_err})");
+            let mut retry = request;
+            retry.messages.push(ChatMessage::assistant(text));
+            retry.messages.push(ChatMessage::user(format!(
+                "Your previous reply did not follow the required format. {format_rule} \
+                 Reply with ONLY correctly formatted lines — no prose, no numbering, \
+                 no markdown fences."
+            )));
+            let second = client
+                .complete(retry)
+                .await
+                .map_err(|e| ResearchError::Source(e.to_string()))?;
+            let retry_text = sanitize_output(&second.content);
+            parse(&retry_text).map_err(|e| {
+                ResearchError::Source(format!(
+                    "{what} failed twice on the required format; nothing was saved \
+                     (no stub rows were written). Last error: {e}"
+                ))
+            })
+        }
+    }
+}
+
 #[async_trait]
 impl ResearchEngine for LlmResearchEngine {
     async fn analyze_gaps(&self, topic_id: &str) -> Result<Vec<KnowledgeGap>> {
@@ -189,12 +234,16 @@ impl ResearchEngine for LlmResearchEngine {
             "Topic: {topic_name}\n\nPapers:\n{context}\n\n\
              Identify 3-5 specific knowledge gaps. \
              For each gap output one line: GAP_TYPE|description\n\
-             GAP_TYPE must be one of: MissingLiterature, UnansweredQuestion, MethodologyGap, ConnectionGap"
+             GAP_TYPE must be one of: MissingLiterature, UnansweredQuestion, MethodologyGap, ConnectionGap\n\
+             Output only the lines, nothing else."
         );
+        let format_rule = "One line per gap, exactly: GAP_TYPE|description where GAP_TYPE is \
+                           one of MissingLiterature, UnansweredQuestion, MethodologyGap, ConnectionGap";
 
         let client = Self::make_client(config)?;
-        let response = client
-            .complete(LLMRequest {
+        complete_parsed(
+            client.as_ref(),
+            LLMRequest {
                 system: Some(
                     "You are a research analyst identifying knowledge gaps in academic literature."
                         .into(),
@@ -203,13 +252,12 @@ impl ResearchEngine for LlmResearchEngine {
                 temperature: 0.3,
                 max_tokens: Some(512),
                 ..LLMRequest::default()
-            })
-            .await
-            .map_err(|e| ResearchError::Source(e.to_string()))?;
-
-        let text = sanitize_output(&response.content);
-
-        parse_gaps(&text, topic_id)
+            },
+            format_rule,
+            "gap analysis",
+            |text| parse_gaps(text, topic_id),
+        )
+        .await
     }
 
     async fn extract_keywords(&self, papers: &[Paper]) -> Result<Vec<(String, String)>> {
@@ -246,8 +294,9 @@ impl ResearchEngine for LlmResearchEngine {
         );
 
         let client = Self::make_client(config)?;
-        let response = client
-            .complete(LLMRequest {
+        complete_parsed(
+            client.as_ref(),
+            LLMRequest {
                 system: Some(
                     "You generate search keywords for academic papers. Output only \
                      'paper_id|keywords' lines, nothing else."
@@ -257,11 +306,12 @@ impl ResearchEngine for LlmResearchEngine {
                 temperature: 0.2,
                 max_tokens: Some(1024),
                 ..LLMRequest::default()
-            })
-            .await
-            .map_err(|e| ResearchError::Source(e.to_string()))?;
-
-        parse_keywords(&sanitize_output(&response.content))
+            },
+            "One line per paper, exactly: paper_id|keyword; keyword; keyword",
+            "keyword enrichment",
+            parse_keywords,
+        )
+        .await
     }
 
     async fn generate_report(&self, title: &str, topic_ids: &[String]) -> Result<ResearchReport> {
@@ -609,5 +659,93 @@ mod tests {
         let got = parse_keywords(text).unwrap();
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].0, "abc-1");
+    }
+
+    /// Scripted client for `complete_parsed`: hands out queued replies in
+    /// order, then fails — the retry paths never need a third reply.
+    struct ScriptedClient(std::sync::Mutex<Vec<std::result::Result<String, String>>>);
+
+    #[async_trait::async_trait]
+    impl llm_kernel::llm::LLMClient for ScriptedClient {
+        async fn complete(
+            &self,
+            _request: llm_kernel::llm::LLMRequest,
+        ) -> llm_kernel::error::Result<llm_kernel::llm::LLMResponse> {
+            // Panics with an index message if the script runs dry — loud
+            // enough for a test double.
+            let next = self.0.lock().unwrap().remove(0);
+            match next {
+                Ok(content) => Ok(llm_kernel::llm::LLMResponse {
+                    content,
+                    ..Default::default()
+                }),
+                Err(e) => Err(llm_kernel::error::KernelError::Config(e)),
+            }
+        }
+
+        fn model_name(&self) -> &str {
+            "scripted"
+        }
+
+        async fn stream_complete(
+            &self,
+            _request: llm_kernel::llm::LLMRequest,
+        ) -> llm_kernel::error::Result<llm_kernel::llm::LLMStream> {
+            Err(llm_kernel::error::KernelError::Config(
+                "not used in these tests".into(),
+            ))
+        }
+    }
+
+    fn scripted_request() -> LLMRequest {
+        LLMRequest {
+            messages: vec![ChatMessage::user("give me the lines")],
+            ..LLMRequest::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn complete_parsed_retries_once_after_a_format_violation() {
+        let client = ScriptedClient(std::sync::Mutex::new(vec![
+            Ok("Formatted lines:".into()),
+            Ok("MissingLiterature|no survey exists".into()),
+        ]));
+
+        let parsed = complete_parsed(
+            &client,
+            scripted_request(),
+            "GAP_TYPE|description",
+            "gap analysis",
+            |text| parse_gaps(text, "t"),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].description, "no survey exists");
+    }
+
+    #[tokio::test]
+    async fn complete_parsed_fails_explicitly_after_two_violations() {
+        let client = ScriptedClient(std::sync::Mutex::new(vec![
+            Ok("prose again".into()),
+            Ok("still just prose".into()),
+        ]));
+
+        let err = complete_parsed(
+            &client,
+            scripted_request(),
+            "GAP_TYPE|description",
+            "gap analysis",
+            |text| parse_gaps(text, "t"),
+        )
+        .await
+        .expect_err("two violations must fail");
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains("nothing was saved"),
+            "the error must state that no stub was persisted, got: {msg}"
+        );
     }
 }

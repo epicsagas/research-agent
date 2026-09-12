@@ -354,6 +354,7 @@ async fn cmd_ingest(
 ) -> Result<()> {
     let store = open_store(&db)?;
     let mut all_papers = Vec::new();
+    let mut new_count = 0usize;
 
     if source == "pdf" {
         let pdf_path =
@@ -366,17 +367,25 @@ async fn cmd_ingest(
             for p in &paths {
                 match src.ingest_file(p) {
                     Ok((paper, body)) => {
-                        if research_agent::application::identity::is_already_stored(&store, &paper)?
-                        {
-                            println!("Already ingested, skipped: {}", paper.title);
-                            continue;
+                        match research_agent::application::identity::find_already_stored(
+                            &store, &paper,
+                        )? {
+                            Some(existing) => {
+                                println!("Already ingested, skipped: {}", existing.title);
+                                // The stored row reaches topic linking too — a
+                                // re-run repairs linking a crashed run missed.
+                                all_papers.push(existing);
+                            }
+                            None => {
+                                store.insert_paper(&paper)?;
+                                if let Some(body) = body {
+                                    store.set_paper_body(&paper.id, &body)?;
+                                }
+                                println!("Ingested PDF: {}", paper.title);
+                                new_count += 1;
+                                all_papers.push(paper);
+                            }
                         }
-                        store.insert_paper(&paper)?;
-                        if let Some(body) = body {
-                            store.set_paper_body(&paper.id, &body)?;
-                        }
-                        println!("Ingested PDF: {}", paper.title);
-                        all_papers.push(paper);
                     }
                     Err(e) => {
                         eprintln!("Warning: skipped {}: {e}", p.display());
@@ -390,9 +399,10 @@ async fn cmd_ingest(
         let src = research_agent::adapters::zotero_source::ZoteroSource::new();
         let pipeline = IngestPipeline::new(&src, &store);
         let q = query.unwrap_or_default();
-        let papers = pipeline.run(&q, limit).await?;
-        println!("Ingested {} papers from Zotero", papers.len());
-        all_papers.extend(papers);
+        let ingested = pipeline.run(&q, limit).await?;
+        println!("Ingested {} papers from Zotero", ingested.new.len());
+        new_count += ingested.new.len();
+        all_papers.extend(ingested.fetched);
     } else {
         let q = query
             .ok_or_else(|| anyhow::anyhow!("A search query is required for --source {source}"))?;
@@ -428,10 +438,11 @@ async fn cmd_ingest(
         // still reach the topic-linking step below.
         let refs: Vec<&dyn research_agent::ports::paper_source::PaperSource> =
             sources.iter().map(|s| s.as_ref()).collect();
-        all_papers.extend(
+        let ingested =
             research_agent::application::ingest_pipeline::run_sources(&refs, &store, &q, limit)
-                .await,
-        );
+                .await;
+        new_count += ingested.new.len();
+        all_papers.extend(ingested.fetched);
     }
 
     if !all_papers.is_empty() {
@@ -440,7 +451,9 @@ async fn cmd_ingest(
 
     if let Some(topic_id) = &topic {
         // The user explicitly asked to link to this topic — a missing
-        // id is an error, not a warning to skip silently.
+        // id is an error, not a warning to skip silently. Already-stored
+        // papers are linked too: `link_paper_to_topic` replaces, so covering
+        // them is what lets a re-run repair linking a crashed run missed.
         if store.get_topic(topic_id)?.is_none() {
             anyhow::bail!("topic '{topic_id}' not found");
         }
@@ -450,7 +463,7 @@ async fn cmd_ingest(
         println!("Linked {} papers to topic {topic_id}", all_papers.len());
     }
 
-    println!("Total: {} papers ingested", all_papers.len());
+    println!("Total: {new_count} papers ingested");
     if !all_papers.is_empty() {
         println!(
             "Run `research enrich` to add search keywords (improves recall for \

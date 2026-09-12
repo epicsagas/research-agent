@@ -121,9 +121,13 @@ macro_rules! tool_result {
 /// Tool-shaped outcome: either the value or an already-built error response.
 type ToolOutcome<T> = Result<T, CallToolResult>;
 
-/// Fetch and persist papers for the requested source(s). Returns the papers
-/// plus the count of individually skipped files (PDFs only).
-async fn ingest_papers(store: &SqliteStore, p: &IngestParams) -> ToolOutcome<(Vec<Paper>, usize)> {
+/// Fetch and persist papers for the requested source(s). Returns (newly
+/// inserted, all papers now in the library from this fetch, individually
+/// skipped files — PDFs only).
+async fn ingest_papers(
+    store: &SqliteStore,
+    p: &IngestParams,
+) -> ToolOutcome<(Vec<Paper>, Vec<Paper>, usize)> {
     if p.source == "pdf" {
         ingest_pdfs(store, p)
     } else {
@@ -133,7 +137,10 @@ async fn ingest_papers(store: &SqliteStore, p: &IngestParams) -> ToolOutcome<(Ve
 
 /// Ingest local PDFs, skipping individual unreadable files (counted, not
 /// fatal — reported back in the tool response).
-fn ingest_pdfs(store: &SqliteStore, p: &IngestParams) -> ToolOutcome<(Vec<Paper>, usize)> {
+fn ingest_pdfs(
+    store: &SqliteStore,
+    p: &IngestParams,
+) -> ToolOutcome<(Vec<Paper>, Vec<Paper>, usize)> {
     let Some(pdf_path) = &p.path else {
         return Err(err_result(ResearchError::Validation(
             "path is required for source=pdf".into(),
@@ -155,60 +162,73 @@ fn ingest_pdfs(store: &SqliteStore, p: &IngestParams) -> ToolOutcome<(Vec<Paper>
             Err(_) => skipped += 1,
         }
     }
-    Ok((papers, skipped))
+    let in_library = papers.clone();
+    Ok((papers, in_library, skipped))
 }
 
 /// Query arXiv and/or Semantic Scholar through the ingest pipeline. Remote
 /// sources fail the whole call on error, so nothing is silently skipped.
-async fn ingest_remote(store: &SqliteStore, p: &IngestParams) -> ToolOutcome<(Vec<Paper>, usize)> {
+/// Returns (newly inserted, all fetched papers now in the library, skipped).
+/// The library-wide list reaches topic linking so a re-run repairs linking a
+/// crashed run missed.
+async fn ingest_remote(
+    store: &SqliteStore,
+    p: &IngestParams,
+) -> ToolOutcome<(Vec<Paper>, Vec<Paper>, usize)> {
     let Some(q) = &p.query else {
         return Err(err_result(ResearchError::Validation(format!(
             "query is required for source={}",
             p.source
         ))));
     };
-    let mut papers = Vec::new();
+    let mut new_papers = Vec::new();
+    let mut in_library = Vec::new();
     if p.source == "arxiv" || p.source == "all" {
         let arxiv = ArxivSource::new();
-        let fetched = IngestPipeline::new(&arxiv, store)
+        let outcome = IngestPipeline::new(&arxiv, store)
             .run(q, p.limit)
             .await
             .map_err(err_result)?;
-        papers.extend(fetched);
+        new_papers.extend(outcome.new);
+        in_library.extend(outcome.fetched);
     }
     if p.source == "s2" || p.source == "all" {
         let s2 = SemanticScholarSource::new();
-        let fetched = IngestPipeline::new(&s2, store)
+        let outcome = IngestPipeline::new(&s2, store)
             .run(q, p.limit)
             .await
             .map_err(err_result)?;
-        papers.extend(fetched);
+        new_papers.extend(outcome.new);
+        in_library.extend(outcome.fetched);
     }
     if p.source == "openalex" || p.source == "all" {
         let oa = OpenAlexSource::new();
-        let fetched = IngestPipeline::new(&oa, store)
+        let outcome = IngestPipeline::new(&oa, store)
             .run(q, p.limit)
             .await
             .map_err(err_result)?;
-        papers.extend(fetched);
+        new_papers.extend(outcome.new);
+        in_library.extend(outcome.fetched);
     }
     if p.source == "europepmc" || p.source == "all" {
         let epmc = EuropePmcSource::new();
-        let fetched = IngestPipeline::new(&epmc, store)
+        let outcome = IngestPipeline::new(&epmc, store)
             .run(q, p.limit)
             .await
             .map_err(err_result)?;
-        papers.extend(fetched);
+        new_papers.extend(outcome.new);
+        in_library.extend(outcome.fetched);
     }
     if p.source == "preprints" || p.source == "all" {
         let pre = PreprintSource::new();
-        let fetched = IngestPipeline::new(&pre, store)
+        let outcome = IngestPipeline::new(&pre, store)
             .run(q, p.limit)
             .await
             .map_err(err_result)?;
-        papers.extend(fetched);
+        new_papers.extend(outcome.new);
+        in_library.extend(outcome.fetched);
     }
-    Ok((papers, 0))
+    Ok((new_papers, in_library, 0))
 }
 
 /// Link every ingested paper to the requested topic. A missing topic is an
@@ -271,8 +291,8 @@ impl ResearchServer {
             Ok(s) => s,
             Err(e) => return err_result(e),
         };
-        let (all_papers, skipped) = match ingest_papers(&store, &p).await {
-            Ok((papers, skipped)) => (papers, skipped),
+        let (new_papers, all_papers, skipped) = match ingest_papers(&store, &p).await {
+            Ok((new_papers, all_papers, skipped)) => (new_papers, all_papers, skipped),
             Err(resp) => return resp,
         };
         if let Err(resp) = link_ingested_to_topic(&store, &all_papers, &p.topic) {
@@ -280,7 +300,8 @@ impl ResearchServer {
         }
 
         ok_value(json!({
-            "ingested": all_papers.len(),
+            "ingested": new_papers.len(),
+            "in_library": all_papers.len(),
             "skipped": skipped,
             "source": p.source,
             "linked_topic": p.topic,

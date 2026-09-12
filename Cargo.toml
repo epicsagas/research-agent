@@ -1,6 +1,6 @@
 [package]
 name = "research-agent"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 description = "Long-term research assistant: index papers, articles, and PDFs"
 repository = "https://github.com/epicsagas/research-agent"
@@ -73,7 +73,9 @@ opt-level = 3
 lto = "thin"
 codegen-units = 1
 strip = "symbols"
-panic = "abort"
+# panic = "abort" is deliberately absent: pdf_source's catch_unwind guards
+# only work with unwinding, so a hostile PDF aborts the paper, not the
+# process. Do not re-add abort here.
 
 [profile.release.package."*"]
 opt-level = 3

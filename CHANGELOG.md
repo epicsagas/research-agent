@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-09-12
+
+### Fixed
+- **arXiv ingest no longer dies on hostile PDFs.** The release profile set
+  `panic = "abort"`, which silently disabled the `catch_unwind` guards around
+  PDF text extraction — one paper with a malformed embedded CMap
+  (`bad length of hexstring` inside adobe-cmap-parser) killed the whole
+  ingest after its metadata row was committed, permanently missing topic
+  linking. The abort setting is gone; a PDF that panics during extraction is
+  now reported as a per-paper warning and the run continues.
+- **Re-ingesting no longer orphans topic links.** The ingest pipeline used to
+  return only newly inserted papers, so a re-run linked nothing ("Ingested 0 /
+  Linked 0") — papers whose linking was missed by a crashed run stayed
+  unlinked forever without manual SQL. The pipeline now returns every fetched
+  paper that is in the library (carrying its stored id); topic linking and
+  body download are idempotent, so a re-run of the same query repairs the
+  gap. Applies to the CLI (arxiv/s2/openalex/europepmc/preprints/zotero/pdf)
+  and the MCP `ingest` tool, which now reports `ingested` (new) and
+  `in_library` (total fetched) separately.
+
+### Changed
+- Gap analysis and keyword enrichment retry once on a format-violating LLM
+  response, echoing the offending reply back with the line format restated
+  (free/OpenRouter models leak reasoning and ignore formats). A second
+  consecutive violation fails with an explicit "nothing was saved (no stub
+  rows were written)" error instead of a silent empty result.
+
 ## [0.2.1] - 2026-09-11
 
 ### Changed
