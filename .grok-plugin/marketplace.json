@@ -1,0 +1,30 @@
+{
+  "name": "research-agent",
+  "description": "Standalone marketplace for the research-agent plugin. Install from this repository.",
+  "owner": {
+    "name": "epicsagas"
+  },
+  "plugins": [
+    {
+      "name": "research-agent",
+      "description": "Personal academic research assistant — arXiv/Semantic-Scholar ingestion, topic hierarchy, LLM gap analysis and reports, and paper ratings.",
+      "category": "productivity",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/epicsagas/research-agent.git",
+        "sha": "329ef7c56d551ecdb55cd96db30b04883fa14615"
+      },
+      "homepage": "https://github.com/epicsagas/research-agent",
+      "keywords": [
+        "research",
+        "arxiv",
+        "papers",
+        "literature",
+        "semantic-scholar",
+        "gap-analysis",
+        "pdf"
+      ],
+      "version": "0.2.4"
+    }
+  ]
+}
