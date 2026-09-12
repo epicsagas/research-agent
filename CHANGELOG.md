@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-09-12
+
+### Fixed
+- Claude Code printed `research-agent: hooks.json: unknown key "$schema"
+  ignored` at every TUI start: the plugin hooks loader only accepts the
+  `hooks` key, and the editor-completion `$schema` line added on 2026-09-08
+  tripped it. The line is gone.
+
 ## [0.2.2] - 2026-09-12
 
 ### Fixed
