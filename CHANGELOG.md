@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-09-12
+
+### Added
+- `research query` now prints a `Source:` line per paper (URL, else DOI,
+  else arXiv abs URL, else local PDF path) so the original document is
+  one glance away from the hit list.
+
 ## [0.2.3] - 2026-09-12
 
 ### Fixed
