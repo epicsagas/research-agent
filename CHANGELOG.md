@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- crates.io publish is a cargo-dist publish job on the same tag-triggered
+  Release run as Homebrew (`publish-jobs = ["homebrew", "./publish-crates"]`),
+  matching alcove. The separate `release-extras` workflow is gone.
+
 ## [0.2.4] - 2026-09-12
 
 ### Added

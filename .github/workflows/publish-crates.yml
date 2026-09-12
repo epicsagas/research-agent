@@ -1,0 +1,28 @@
+# Reusable publish job called from cargo-dist's Release workflow
+# (`publish-jobs = ["homebrew", "./publish-crates"]` in dist-workspace.toml).
+# Same pattern as alcove: Homebrew and crates.io are siblings under one
+# tag-triggered Release run — not a separate workflow.
+name: Publish to crates.io
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+
+jobs:
+  publish-crates:
+    runs-on: ubuntu-latest
+    env:
+      PLAN: ${{ inputs.plan }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish
+        run: cargo publish --locked --token ${{ secrets.CARGO_REGISTRY_TOKEN }}

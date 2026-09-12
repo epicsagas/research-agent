@@ -33,8 +33,10 @@ macos-sign = false
 install-path = "CARGO_HOME"
 # Whether to install an updater program
 install-updater = false
-# Publish the Homebrew formula to the tap on release.
-publish-jobs = ["homebrew"]
+# Homebrew tap + crates.io, both as cargo-dist publish jobs on the same
+# tag-triggered Release run (alcove pattern). `./publish-crates` is
+# `.github/workflows/publish-crates.yml`.
+publish-jobs = ["homebrew", "./publish-crates"]
 
 [dist.github-custom-runners]
 aarch64-unknown-linux-gnu = "ubuntu-24.04-arm"

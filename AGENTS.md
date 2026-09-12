@@ -18,17 +18,15 @@ optional `[llm]` config only powers the standalone CLI.
 - Run: `cargo run -- --db /tmp/r.db init`, then `ingest <query>`, `status`;
 - MCP: `cargo run -- mcp` (stdio JSON-RPC; 18 tools)
 - Release: `dist generate` after editing `dist-workspace.toml`; releases fire on
-  a pushed `vX.Y.Z` tag. CI also runs on release tags, and crates.io
-  publishing (`.github/workflows/release-extras.yml`) waits until every check
-  run on the tag commit is green — CI and the Release build itself — before
-  `cargo publish` (a green no-op until `CARGO_REGISTRY_TOKEN` is configured).
-  Homebrew tap publishing is owned by cargo-dist's own
-  `publish-homebrew-formula` job (`HOMEBREW_TAP_TOKEN`) — keep it
-  single-owner, do not add a second pusher. `dist generate`
-  regenerates release.yml and drops the hand-added `continue-on-error: true`
-  on `publish-homebrew-formula` — re-add it after regenerating. The repo's
-  default workflow permission must stay `write` or the release cannot create
-  the GitHub Release (HTTP 403)
+  a pushed `vX.Y.Z` tag. Homebrew (`publish-homebrew-formula`) and crates.io
+  (`custom-publish-crates` → `.github/workflows/publish-crates.yml`) are both
+  cargo-dist publish jobs on that same Release run (`publish-jobs =
+  ["homebrew", "./publish-crates"]`, alcove pattern). Do not add a second
+  Homebrew pusher. `dist generate` regenerates release.yml and drops the
+  hand-added `continue-on-error: true` on `publish-homebrew-formula` and the
+  `install.sh`/`install.ps1` copy into artifacts — re-add both after
+  regenerating. The repo's default workflow permission must stay `write` or
+  the release cannot create the GitHub Release (HTTP 403)
 
 ## Project Structure
 
