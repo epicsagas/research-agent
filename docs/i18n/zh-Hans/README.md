@@ -89,7 +89,8 @@ agy plugin enable research-agent
 ### Grok Build
 
 ```bash
-grok plugin install epicsagas/research-agent --trust
+grok plugin marketplace add epicsagas/research-agent
+grok plugin install research-agent@research-agent --trust
 ```
 
 ### Hermes Agent
