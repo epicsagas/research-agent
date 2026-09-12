@@ -47,11 +47,16 @@ jobs:
           [ -n "$sha" ] || sha="$(git ls-remote "$repo" "${TAG_REF}" | cut -f1)"
           echo "waiting on workflow runs for ${TAG_REF} (${sha})"
           for i in $(seq 1 120); do
-            # poll workflow runs on the tag commit, ignoring this workflow —
-            # our own runs would never be "success" while we wait on them
+            # Poll runs on the tag commit that belong to the tag itself
+            # (head_branch == TAG_REF). The same SHA also has a `main` CI
+            # run; pushing the next commit cancels it, and treating that
+            # cancelled run as a failure blocked crates.io on v0.2.4.
+            # Ignore this workflow — it would never be success while we wait.
             out="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${sha}" \
-              --jq '.workflow_runs[] | select(.name != "Release extras") |
-                    "\(.name) \(.status)/\(.conclusion // "pending")"' | sort -u)"
+              | jq --arg tag "$TAG_REF" -r \
+                '.workflow_runs[]
+                 | select(.name != "Release extras" and .head_branch == $tag)
+                 | "\(.name) \(.status)/\(.conclusion // "pending")"' | sort -u)"
             echo "attempt ${i}:"
             echo "$out"
             case "$out" in
