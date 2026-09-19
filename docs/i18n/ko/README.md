@@ -48,6 +48,10 @@ research-agent는 **AI 에이전트를 위한 연구 서버**입니다. 논문(a
 <img width="49%" src="../../../assets/overview.png" alt="dashboard-overview" />
 <img width="49%" src="../../../assets/papers.png" alt="dashboard-overview" />
 
+## 쇼케이스
+
+**[온톨로지 계보](https://epicsagas.github.io/ontology-explorer/)** — research-agent로 425편을 수집·갭 분석·정리해 한 페이지에 담은 온톨로지 리서치 사이트(한국어 · 영어): 계보 타임라인, 통합 아키텍처, 5단계 학습 루트, 전체 문헌 브라우저.
+
 ## 주요 기능
 
 | | 기능 | 가치 |

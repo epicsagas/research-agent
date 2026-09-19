@@ -48,6 +48,10 @@ Le même binaire fonctionne également comme un CLI autonome pour le terminal et
 <img width="49%" src="../../../assets/overview.png" alt="dashboard-overview" />
 <img width="49%" src="../../../assets/papers.png" alt="dashboard-overview" />
 
+## Vitrine
+
+**[The Ontology Lineage](https://epicsagas.github.io/ontology-explorer/)** — 2 300 ans de recherche ontologique sur une page statique (coréen · anglais) : frise chronologique, architecture intégrée, parcours d'apprentissage en cinq étapes et navigateur des 425 articles — collectés, analysés et organisés avec research-agent.
+
 ## Fonctionnalités
 
 | | Fonctionnalité | Pourquoi c'est important |

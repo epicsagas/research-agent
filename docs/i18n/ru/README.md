@@ -48,6 +48,10 @@ research-agent — это **исследовательский сервер дл
 <img width="49%" src="../../../assets/overview.png" alt="dashboard-overview" />
 <img width="49%" src="../../../assets/papers.png" alt="dashboard-overview" />
 
+## Витрина
+
+**[The Ontology Lineage](https://epicsagas.github.io/ontology-explorer/)** — 2300 лет исследований онтологий на одной статической странице (корейский · английский): хронология, интегрированная архитектура, обучающий маршрут из пяти этапов и обозреватель всех 425 статей — собраны, проанализированы и структурированы с помощью research-agent.
+
 ## Возможности
 
 | | Возможность | Почему это важно |

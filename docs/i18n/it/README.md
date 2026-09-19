@@ -48,6 +48,10 @@ Lo stesso file binario funziona anche come CLI autonoma per terminali e script.
 <img width="49%" src="../../../assets/overview.png" alt="dashboard-overview" />
 <img width="49%" src="../../../assets/papers.png" alt="dashboard-overview" />
 
+## Vetrina
+
+**[The Ontology Lineage](https://epicsagas.github.io/ontology-explorer/)** — 2.300 anni di ricerca ontologica in una pagina statica (coreano · inglese): cronologia, architettura integrata, percorso di apprendimento in cinque tappe ed esploratore dei 425 articoli — raccolti, analizzati e organizzati con research-agent.
+
 ## Funzionalità principali
 
 | | Funzionalità | Perché è importante |

@@ -48,6 +48,10 @@ Die gleiche Binärdatei funktioniert auch als eigenständiges CLI für Terminals
 <img width="49%" src="../../../assets/overview.png" alt="dashboard-overview" />
 <img width="49%" src="../../../assets/papers.png" alt="dashboard-overview" />
 
+## Showcase
+
+**[The Ontology Lineage](https://epicsagas.github.io/ontology-explorer/)** — 2.300 Jahre Ontologie-Forschung auf einer statischen Seite (Koreanisch · Englisch): Zeitstrahl, integrierte Architektur, Lernroute in fünf Stufen und ein Browser für alle 425 Paper — gesammelt, analysiert und organisiert mit research-agent.
+
 ## Funktionen
 
 | | Funktion | Warum es wichtig ist |

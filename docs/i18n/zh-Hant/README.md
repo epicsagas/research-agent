@@ -48,6 +48,10 @@ research-agent 是一款 **專為 AI Agent 打造的學術研究伺服器**：�
 <img width="49%" src="../../../assets/overview.png" alt="dashboard-overview" />
 <img width="49%" src="../../../assets/papers.png" alt="dashboard-overview" />
 
+## 展示案例
+
+**[The Ontology Lineage](https://epicsagas.github.io/ontology-explorer/)** — 使用 research-agent 收集、缺口分析並整理的 425 篇文獻，濃縮為一個靜態頁面（韓語 · 英語）：譜系時間軸、整合架構、五階段學習路線與全文瀏覽。
+
 ## 功能特色
 
 | | 特色 | 價值 |
