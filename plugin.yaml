@@ -2,7 +2,7 @@
 # Spec: https://hermes-agent.nousresearch.com/docs/developer-guide/plugins
 # Loaded by `hermes plugins` from ~/.hermes/plugins/research-agent/plugin.yaml
 name: research-agent
-version: "0.2.5"
+version: "0.2.6"
 description: "Academic research assistant — ingest arXiv/S2 papers, organize topics, track reading."
 author:
   name: epicsagas
