@@ -280,8 +280,9 @@ async fn handle_conn(
         // `/api/models` is the one async route; it must pass the same Host
         // guard as everything routed through `route`, or a rebound DNS name
         // could make the server spend the configured API key on its behalf.
-        if method == "GET" && path == "/api/models" && host_allowed(&ctx) && authed_for_models(&ctx)
-        {
+        // Like `route`, the guard yields once a token is configured: a rebound
+        // page cannot present the token, so auth is the boundary then.
+        if method == "GET" && path == "/api/models" && models_route_allowed(&ctx) {
             fetch_models(&ctx).await
         } else {
             route(&method, &raw_path, body.as_deref(), &ctx)
@@ -300,6 +301,14 @@ fn authed_for_models(ctx: &RouteCtx) -> bool {
         None => true,
         Some(required) => request_token(ctx).is_some_and(|t| ct_eq(&t, required)),
     }
+}
+
+/// Whether `GET /api/models` takes the async proxy path instead of falling
+/// through to `route`. Same guard as `route`: loopback-only until a token is
+/// configured, then the token is the boundary (a rebound page cannot present
+/// it) and non-loopback Hosts are legitimate remote browsers.
+fn models_route_allowed(ctx: &RouteCtx) -> bool {
+    authed_for_models(ctx) && (host_allowed(ctx) || ctx.token.is_some())
 }
 
 /// Query the configured provider's OpenAI-compatible `GET /models` endpoint
@@ -1137,6 +1146,19 @@ mod tests {
         assert_eq!(route("GET", "/api/models", None, &evil).status, 403);
         let no_host = ctx_host(&ctx.db_path, None);
         assert_eq!(route("GET", "/api/models", None, &no_host).status, 403);
+        // Without a token the async path is loopback-only too...
+        assert!(!models_route_allowed(&evil));
+        assert!(!models_route_allowed(&no_host));
+        // ...but once a token is configured the token is the boundary and a
+        // legitimate remote browser must still reach the async path.
+        let remote_token = ctx_host(&ctx.db_path, Some("rebind.evil.com:7777"));
+        let mut remote_token = remote_token;
+        remote_token.token = Some("tok".into());
+        remote_token.authz = Some("Bearer tok".into());
+        assert!(models_route_allowed(&remote_token));
+        // A wrong token stays out.
+        remote_token.authz = Some("Bearer nope".into());
+        assert!(!models_route_allowed(&remote_token));
     }
 
     #[test]
