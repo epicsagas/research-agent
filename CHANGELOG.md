@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-09-20
+
+### Fixed
+- The dashboard settings page could not load the provider model list over
+  network access: `GET /api/models` gated on the loopback-only Host guard even
+  when a dashboard token was configured, so every authenticated request from a
+  non-loopback browser fell through to a placeholder route instead of proxying
+  to the provider. The guard now yields once a token is configured, mirroring
+  the rest of the router.
+
 ### Changed
 - crates.io publish is a cargo-dist publish job on the same tag-triggered
   Release run as Homebrew (`publish-jobs = ["homebrew", "./publish-crates"]`),

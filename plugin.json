@@ -1,6 +1,6 @@
 {
   "name": "research-agent",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Personal academic research assistant — arXiv/Semantic-Scholar ingestion, topic hierarchy, LLM gap analysis and reports, and paper ratings.",
   "author": {
     "name": "epicsagas",
