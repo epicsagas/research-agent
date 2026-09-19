@@ -50,7 +50,7 @@ El mismo binario también funciona como una CLI independiente para terminales y 
 
 ## Vitrina
 
-**[The Ontology Lineage](https://epicsagas.github.io/ontology-explorer/)** — 2.300 años de investigación ontológica en una página estática (coreano · inglés): línea de tiempo, arquitectura integrada, ruta de aprendizaje en cinco etapas y un explorador de los 425 artículos — recopilados, analizados y organizados con research-agent.
+**[The Ontology Lineage](https://epicsagas.github.io/ontology-explorer/en/)** — 2.300 años de investigación ontológica en una página estática (coreano · inglés): línea de tiempo, arquitectura integrada, ruta de aprendizaje en cinco etapas y un explorador de los 425 artículos — recopilados, analizados y organizados con research-agent.
 
 ## Características principales
 

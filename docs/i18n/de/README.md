@@ -50,7 +50,7 @@ Die gleiche Binärdatei funktioniert auch als eigenständiges CLI für Terminals
 
 ## Showcase
 
-**[The Ontology Lineage](https://epicsagas.github.io/ontology-explorer/)** — 2.300 Jahre Ontologie-Forschung auf einer statischen Seite (Koreanisch · Englisch): Zeitstrahl, integrierte Architektur, Lernroute in fünf Stufen und ein Browser für alle 425 Paper — gesammelt, analysiert und organisiert mit research-agent.
+**[The Ontology Lineage](https://epicsagas.github.io/ontology-explorer/en/)** — 2.300 Jahre Ontologie-Forschung auf einer statischen Seite (Koreanisch · Englisch): Zeitstrahl, integrierte Architektur, Lernroute in fünf Stufen und ein Browser für alle 425 Paper — gesammelt, analysiert und organisiert mit research-agent.
 
 ## Funktionen
 

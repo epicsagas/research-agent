@@ -50,7 +50,7 @@ research-agent は **AIエージェント向けのリサーチサーバー** で
 
 ## ショーケース
 
-**[The Ontology Lineage](https://epicsagas.github.io/ontology-explorer/)** — research-agentで425編を収集・ギャップ分析・整理し、1ページにまとめたオントロジーリサーチサイト(韓国語 · 英語): 系譜タイムライン、統合アーキテクチャ、5段階ラーニングルート、全文献ブラウザ。
+**[The Ontology Lineage](https://epicsagas.github.io/ontology-explorer/en/)** — research-agentで425編を収集・ギャップ分析・整理し、1ページにまとめたオントロジーリサーチサイト(韓国語 · 英語): 系譜タイムライン、統合アーキテクチャ、5段階ラーニングルート、全文献ブラウザ。
 
 ## 主な機能
 

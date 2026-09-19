@@ -50,7 +50,7 @@ O mesmo executável binário também funciona como uma CLI independente para ter
 
 ## Vitrine
 
-**[The Ontology Lineage](https://epicsagas.github.io/ontology-explorer/)** — 2.300 anos de pesquisa ontológica em uma página estática (coreano · inglês): linha do tempo, arquitetura integrada, rota de aprendizado em cinco etapas e um navegador dos 425 artigos — coletados, analisados e organizados com o research-agent.
+**[The Ontology Lineage](https://epicsagas.github.io/ontology-explorer/en/)** — 2.300 anos de pesquisa ontológica em uma página estática (coreano · inglês): linha do tempo, arquitetura integrada, rota de aprendizado em cinco etapas e um navegador dos 425 artigos — coletados, analisados e organizados com o research-agent.
 
 ## Recursos principais
 

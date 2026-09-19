@@ -50,7 +50,7 @@ research-agent 是一款 **专为 AI Agent 打造的学术研究服务端**：�
 
 ## 展示案例
 
-**[The Ontology Lineage](https://epicsagas.github.io/ontology-explorer/)** — 使用 research-agent 收集、差距分析并整理的 425 篇文献，浓缩为一个静态页面（韩语 · 英语）：谱系时间线、集成架构、五阶段学习路线与全文浏览。
+**[The Ontology Lineage](https://epicsagas.github.io/ontology-explorer/en/)** — 使用 research-agent 收集、差距分析并整理的 425 篇文献，浓缩为一个静态页面（韩语 · 英语）：谱系时间线、集成架构、五阶段学习路线与全文浏览。
 
 ## 功能特性
 
