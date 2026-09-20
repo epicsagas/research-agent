@@ -51,6 +51,7 @@ The same binary also works as a standalone CLI for terminals and scripts.
 ## Showcase
 
 **[The Ontology Lineage](https://epicsagas.github.io/ontology-explorer/en/)** — 2,300 years of ontology research distilled into one static page (Korean · English): a lineage timeline, an integrated architecture, a five-stage learning route, and a browser for all 425 papers — collected, gap-analyzed, and organized with [research-agent](https://github.com/epicsagas/research-agent).
+**[The Uncanny Valley of AI Writing](https://epicsagas.github.io/uncanny-writing/)** — why readers turn away from AI-generated text, fact-checked (Korean · English): 5 cited sources independently verified, 86 papers from arXiv/OpenAlex mapped across 7 themes, counter-evidence, and a 4-gap ledger — collected, gap-analyzed, and organized with research-agent.
 
 ## Features
 
